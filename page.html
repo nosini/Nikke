@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Union Raid Optimizer</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#060b14;--surface:#0d1626;--surface2:#111d33;--border:#1e3355;
+    --accent:#00d4ff;--accent2:#ff4d7d;--accent3:#7fff6e;--gold:#ffd060;
+    --text:#cde4ff;--muted:#4a6a99;--danger:#ff3b3b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:'Exo 2',sans-serif;min-height:100vh;overflow-x:hidden;}
+  body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,212,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,.025) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
+  body>*{position:relative;z-index:1;}
+
+  header{text-align:center;padding:2.5rem 1rem 1.8rem;border-bottom:1px solid var(--border);background:linear-gradient(180deg,rgba(0,212,255,.06) 0%,transparent 100%);}
+  header h1{font-family:'Rajdhani',sans-serif;font-size:clamp(2rem,6vw,3.6rem);font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#fff;text-shadow:0 0 28px rgba(0,212,255,.55),0 0 55px rgba(0,212,255,.18);}
+  header p{color:var(--muted);font-family:'Share Tech Mono',monospace;font-size:.75rem;letter-spacing:.2em;margin-top:.4rem;text-transform:uppercase;}
+
+  .container{max-width:1280px;margin:0 auto;padding:2rem 1.5rem;}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;}
+  @media(max-width:900px){.grid-2{grid-template-columns:1fr;}}
+
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1.5rem;position:relative;}
+  .panel::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);border-radius:8px 8px 0 0;}
+  .panel-title{font-family:'Rajdhani',sans-serif;font-size:1.05rem;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);margin-bottom:1.2rem;}
+
+  .form-label{display:block;font-family:'Share Tech Mono',monospace;font-size:.67rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:.32rem;}
+  .form-row{margin-bottom:.85rem;}
+  .form-2col{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;}
+  @media(max-width:480px){.form-2col{grid-template-columns:1fr;}}
+
+  input[type=text],input[type=number],select{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:'Share Tech Mono',monospace;font-size:.82rem;padding:.5rem .7rem;border-radius:4px;outline:none;transition:border-color .2s,box-shadow .2s;appearance:none;}
+  input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(0,212,255,.1);}
+  select option{background:var(--bg);}
+
+  /* char slots */
+  .char-slots{display:flex;flex-direction:column;gap:.45rem;margin-bottom:.85rem;}
+  .char-slot{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;align-items:center;}
+  @media(max-width:480px){.char-slot{grid-template-columns:1fr;}}
+
+  .cs-trigger{display:flex;align-items:center;gap:.45rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:.45rem .65rem;cursor:pointer;min-height:36px;transition:border-color .2s;user-select:none;}
+  .cs-trigger:hover,.cs-trigger.open{border-color:var(--accent);}
+  .cs-trigger-label{flex:1;font-family:'Share Tech Mono',monospace;font-size:.76rem;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .cs-trigger-label.ph{color:var(--muted);}
+  .cs-trigger-arrow{color:var(--muted);font-size:.52rem;flex-shrink:0;transition:transform .2s;}
+  .cs-trigger.open .cs-trigger-arrow{transform:rotate(180deg);}
+
+  .dmg-wrap{position:relative;}
+  .dmg-wrap input{padding-left:1.7rem;}
+  .dmg-num{position:absolute;left:.5rem;top:50%;transform:translateY(-50%);font-family:'Share Tech Mono',monospace;font-size:.57rem;color:var(--muted);pointer-events:none;}
+
+  /* shared floating dropdown */
+  #cs-floating{position:fixed;z-index:99999;background:var(--surface2);border:1px solid var(--accent);border-radius:6px;box-shadow:0 12px 35px rgba(0,0,0,.75);width:240px;max-height:360px;flex-direction:column;display:none;}
+  #cs-floating.open{display:flex;}
+  .cs-search{padding:.45rem;border-bottom:1px solid var(--border);flex-shrink:0;}
+  .cs-search input{background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:'Share Tech Mono',monospace;font-size:.73rem;padding:.38rem .55rem;border-radius:3px;width:100%;outline:none;}
+  .cs-search input:focus{border-color:var(--accent);}
+  .cs-options{overflow-y:auto;flex:1;}
+  .cs-options::-webkit-scrollbar{width:4px;}
+  .cs-options::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+  .cs-opt{padding:.42rem .75rem;cursor:pointer;font-family:'Share Tech Mono',monospace;font-size:.74rem;color:var(--text);transition:background .1s;}
+  .cs-opt:hover,.cs-opt.sel,.cs-opt.arrow-hi{background:rgba(0,212,255,.12);color:#fff;}
+  .cs-opt.none{color:var(--muted);font-style:italic;}
+  .cs-opt.custom{color:var(--accent3);}
+
+  /* calc total */
+  .total-row{display:flex;align-items:center;justify-content:space-between;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:.52rem .82rem;margin-bottom:.85rem;}
+  .total-lbl{font-family:'Share Tech Mono',monospace;font-size:.65rem;letter-spacing:.12em;color:var(--muted);text-transform:uppercase;}
+  .total-val{font-family:'Rajdhani',sans-serif;font-size:1.1rem;font-weight:700;color:var(--accent3);text-shadow:0 0 8px rgba(127,255,110,.3);}
+  .sec-head{font-family:'Share Tech Mono',monospace;font-size:.62rem;letter-spacing:.16em;color:var(--muted);text-transform:uppercase;border-top:1px solid var(--border);padding-top:.82rem;margin-bottom:.65rem;}
+
+  /* buttons */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;padding:.52rem 1.05rem;font-family:'Rajdhani',sans-serif;font-size:.88rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;border:none;border-radius:4px;cursor:pointer;transition:all .2s;}
+  .btn-primary{background:linear-gradient(135deg,#0090cc,var(--accent));color:#000;box-shadow:0 0 12px rgba(0,212,255,.2);}
+  .btn-primary:hover{box-shadow:0 0 20px rgba(0,212,255,.4);transform:translateY(-1px);}
+  .btn-danger{background:rgba(255,59,59,.1);color:var(--danger);border:1px solid rgba(255,59,59,.3);padding:.3rem .58rem;font-size:.68rem;}
+  .btn-danger:hover{background:rgba(255,59,59,.2);}
+  .btn-optimize{background:linear-gradient(135deg,#a020f0,#ff4d7d);color:#fff;width:100%;padding:.85rem;font-size:1.05rem;letter-spacing:.2em;box-shadow:0 0 18px rgba(255,77,125,.25);margin-top:.5rem;}
+  .btn-optimize:hover{box-shadow:0 0 32px rgba(255,77,125,.5);transform:translateY(-1px);}
+
+  /* roster */
+  .stats-bar{display:flex;gap:.6rem;margin-bottom:.85rem;flex-wrap:wrap;}
+  .stat-chip{background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:.3rem .58rem;font-family:'Share Tech Mono',monospace;font-size:.66rem;color:var(--muted);}
+  .stat-chip span{color:var(--accent);}
+  .team-list-scroll{max-height:460px;overflow-y:auto;padding-right:.2rem;}
+  .team-list-scroll::-webkit-scrollbar{width:4px;}
+  .team-list-scroll::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+  #team-list{display:flex;flex-direction:column;gap:.6rem;}
+  .team-card{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:.75rem .95rem;display:flex;align-items:flex-start;justify-content:space-between;gap:.7rem;transition:border-color .2s;}
+  .team-card.locked{border-color:var(--gold);background:rgba(255,208,96,.04);}
+  .tc-body{flex:1;min-width:0;}
+  .tc-name{font-family:'Rajdhani',sans-serif;font-weight:700;font-size:.9rem;color:var(--accent);margin-bottom:.15rem;}
+  .team-card.locked .tc-name{color:var(--gold);}
+  .tc-meta{font-family:'Share Tech Mono',monospace;font-size:.62rem;color:var(--muted);margin-bottom:.38rem;}
+  .tc-chars{display:flex;flex-wrap:wrap;gap:.28rem;}
+  .char-pill{background:rgba(0,212,255,.07);border:1px solid rgba(0,212,255,.18);border-radius:3px;padding:.15rem .45rem;font-family:'Share Tech Mono',monospace;font-size:.63rem;color:var(--text);}
+  .char-pill .cdmg{color:var(--accent3);margin-left:.3rem;opacity:.8;}
+  .tc-score{font-family:'Rajdhani',sans-serif;font-size:1.15rem;font-weight:700;color:var(--accent3);white-space:nowrap;text-shadow:0 0 8px rgba(127,255,110,.3);}
+  .tc-actions{display:flex;flex-direction:column;gap:.28rem;align-items:flex-end;}
+  .lock-btn{background:transparent;border:1px solid var(--muted);color:var(--muted);font-family:'Share Tech Mono',monospace;font-size:.58rem;letter-spacing:.07em;padding:.24rem .48rem;border-radius:3px;cursor:pointer;transition:all .2s;text-transform:uppercase;white-space:nowrap;}
+  .lock-btn:hover,.lock-btn.on{border-color:var(--gold);color:var(--gold);}
+
+  /* results */
+  #results{margin-top:2rem;}
+  .res-header{font-family:'Rajdhani',sans-serif;font-size:1.3rem;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:#fff;text-align:center;margin-bottom:1.3rem;}
+  .res-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;}
+  @media(max-width:750px){.res-grid{grid-template-columns:1fr;}}
+  .res-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1.15rem;position:relative;overflow:hidden;animation:fadeUp .4s ease both;}
+  .res-card:nth-child(1){animation-delay:.05s}.res-card:nth-child(2){animation-delay:.1s}.res-card:nth-child(3){animation-delay:.15s}
+  .res-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--accent2),var(--accent));}
+  .res-rank{font-family:'Share Tech Mono',monospace;font-size:.6rem;letter-spacing:.2em;color:var(--muted);margin-bottom:.2rem;}
+  .res-locked{display:inline-block;background:rgba(255,208,96,.12);border:1px solid var(--gold);color:var(--gold);font-family:'Share Tech Mono',monospace;font-size:.56rem;letter-spacing:.08em;padding:.13rem .4rem;border-radius:3px;margin-bottom:.36rem;}
+  .res-name{font-family:'Rajdhani',sans-serif;font-size:1.08rem;font-weight:700;color:#fff;margin-bottom:.1rem;}
+  .res-boss{font-family:'Share Tech Mono',monospace;font-size:.6rem;color:var(--muted);margin-bottom:.45rem;}
+  .res-score{font-family:'Rajdhani',sans-serif;font-size:1.5rem;font-weight:800;color:var(--accent3);text-shadow:0 0 12px rgba(127,255,110,.35);margin-bottom:.65rem;}
+  .res-chars{display:flex;flex-wrap:wrap;gap:.3rem;}
+  .res-char{background:rgba(0,212,255,.06);border:1px solid rgba(0,212,255,.16);border-radius:4px;padding:.25rem .4rem;font-family:'Share Tech Mono',monospace;font-size:.6rem;color:var(--text);}
+  .res-char .rd{display:block;font-size:.52rem;color:var(--accent3);margin-top:.1rem;}
+  .total-box{background:linear-gradient(135deg,rgba(255,77,125,.08),rgba(0,212,255,.08));border:1px solid rgba(255,77,125,.35);border-radius:8px;padding:1.35rem;text-align:center;margin-top:1.35rem;}
+  .total-box-lbl{font-family:'Share Tech Mono',monospace;font-size:.67rem;letter-spacing:.3em;text-transform:uppercase;color:var(--muted);margin-bottom:.38rem;}
+  .total-box-val{font-family:'Rajdhani',sans-serif;font-size:clamp(2rem,5vw,2.7rem);font-weight:800;color:#fff;text-shadow:0 0 26px rgba(255,77,125,.45),0 0 52px rgba(0,212,255,.15);}
+  .total-box-full{font-family:'Share Tech Mono',monospace;font-size:.78rem;color:var(--muted);margin-top:.4rem;letter-spacing:.06em;}
+
+  .err-box{background:rgba(255,59,59,.07);border:1px solid rgba(255,59,59,.35);border-radius:6px;padding:.6rem .85rem;margin-top:.82rem;font-family:'Share Tech Mono',monospace;font-size:.7rem;color:var(--danger);display:none;}
+  .err-box.on{display:block;}
+  .empty-state{text-align:center;padding:2.4rem 1rem;color:var(--muted);font-family:'Share Tech Mono',monospace;font-size:.72rem;letter-spacing:.07em;}
+  .divider{border:none;border-top:1px solid var(--border);margin:1.4rem 0;}
+
+  /* ── OCR panel ── */
+  .ocr-panel{margin-bottom:1.5rem;}
+  .ocr-panel::before{background:linear-gradient(90deg,transparent,var(--accent2),transparent);}
+  .ocr-creds{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:.85rem;}
+  @media(max-width:600px){.ocr-creds{grid-template-columns:1fr;}}
+  .ocr-drop{border:2px dashed var(--border);border-radius:8px;padding:2rem 1rem;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;position:relative;margin-bottom:.85rem;}
+  .ocr-drop:hover,.ocr-drop.drag{border-color:var(--accent2);background:rgba(255,77,125,.04);}
+  .ocr-drop input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+  .ocr-drop-icon{font-size:2rem;margin-bottom:.4rem;display:block;}
+  .ocr-drop-lbl{font-family:'Share Tech Mono',monospace;font-size:.7rem;color:var(--muted);letter-spacing:.1em;}
+  .ocr-preview-wrap{display:none;margin-bottom:.85rem;position:relative;}
+  .ocr-preview-wrap img{width:100%;max-height:240px;object-fit:contain;border-radius:6px;border:1px solid var(--border);}
+  .ocr-preview-clear{position:absolute;top:.4rem;right:.4rem;background:rgba(0,0,0,.7);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:.2rem .5rem;font-size:.65rem;cursor:pointer;font-family:'Share Tech Mono',monospace;}
+  .btn-ocr{background:linear-gradient(135deg,#c020a0,var(--accent2));color:#fff;width:100%;padding:.72rem;font-size:.9rem;letter-spacing:.18em;box-shadow:0 0 14px rgba(255,77,125,.2);margin-bottom:.85rem;}
+  .btn-ocr:hover{box-shadow:0 0 26px rgba(255,77,125,.45);transform:translateY(-1px);}
+  .btn-ocr:disabled{opacity:.45;cursor:not-allowed;transform:none;}
+  .ocr-status{font-family:'Share Tech Mono',monospace;font-size:.68rem;color:var(--muted);text-align:center;margin-bottom:.6rem;min-height:1.1em;letter-spacing:.06em;}
+  .ocr-status.ok{color:var(--accent3);}
+  .ocr-status.err{color:var(--danger);}
+  .ocr-results{display:none;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:1rem;}
+  .ocr-results.on{display:block;}
+  .ocr-results-title{font-family:'Share Tech Mono',monospace;font-size:.63rem;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:.6rem;}
+  .ocr-rows{display:flex;flex-direction:column;gap:.38rem;margin-bottom:.75rem;}
+  .ocr-row{display:grid;grid-template-columns:1fr auto auto;gap:.5rem;align-items:center;}
+  .ocr-row .cs-trigger{min-height:34px;font-size:.72rem;}
+  .ocr-row-dmg{font-family:'Share Tech Mono',monospace;font-size:.72rem;color:var(--accent3);background:var(--bg);border:1px solid var(--border);border-radius:3px;padding:.3rem .5rem;width:130px;}
+  .ocr-row-del{background:transparent;border:1px solid rgba(255,59,59,.3);color:var(--danger);border-radius:3px;padding:.2rem .4rem;cursor:pointer;font-size:.65rem;line-height:1;}
+  .ocr-total-row{font-family:'Share Tech Mono',monospace;font-size:.68rem;color:var(--muted);border-top:1px solid var(--border);padding-top:.6rem;display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem;}
+  .ocr-total-row span{color:var(--accent3);}
+  .btn-apply{background:linear-gradient(135deg,#0090cc,var(--accent));color:#000;width:100%;padding:.6rem;font-size:.85rem;letter-spacing:.12em;}
+  .btn-apply:hover{box-shadow:0 0 18px rgba(0,212,255,.4);transform:translateY(-1px);}
+  .creds-toggle{font-family:'Share Tech Mono',monospace;font-size:.63rem;color:var(--muted);cursor:pointer;letter-spacing:.1em;text-transform:uppercase;display:flex;align-items:center;gap:.4rem;margin-bottom:.65rem;user-select:none;}
+  .creds-toggle:hover{color:var(--accent);}
+  .creds-body{display:none;}
+  .creds-body.on{display:block;}
+  .creds-note{font-family:'Share Tech Mono',monospace;font-size:.61rem;color:var(--muted);margin-top:.3rem;line-height:1.5;}
+
+  #toast{position:fixed;bottom:1.8rem;left:50%;transform:translateX(-50%) translateY(3.5rem);background:var(--surface2);border:1px solid var(--accent);color:var(--accent);font-family:'Share Tech Mono',monospace;font-size:.7rem;letter-spacing:.1em;padding:.6rem 1.3rem;border-radius:4px;box-shadow:0 0 16px rgba(0,212,255,.18);transition:transform .3s,opacity .3s;opacity:0;z-index:100000;}
+  #toast.on{transform:translateX(-50%) translateY(0);opacity:1;}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>⚔ Union Raid Optimizer</h1>
+  <p>3 Runs · Maximum Damage · Zero Conflicts</p>
+</header>
+
+<div class="container">
+
+  <!-- ── OCR Screenshot Scanner ── -->
+  <div class="panel ocr-panel">
+    <div class="panel-title">📷 Screenshot OCR · Cloudflare AI</div>
+
+    <div class="creds-toggle" onclick="toggleCreds()">
+      <span id="creds-arrow">▶</span> OCR Authentication
+    </div>
+    <div class="creds-body" id="creds-body">
+      <div class="ocr-creds">
+        <div class="form-row">
+          <label class="form-label">Username</label>
+          <input type="text" id="ocr-user" placeholder="username" autocomplete="username" />
+        </div>
+        <div class="form-row">
+          <label class="form-label">Password</label>
+          <input type="password" id="ocr-pass" placeholder="password" autocomplete="current-password" />
+        </div>
+      </div>
+      <div class="creds-note">
+        Credentials are saved in your browser only.
+        <br><button class="btn btn-primary" style="margin-top:.5rem;padding:.3rem .7rem;font-size:.7rem;" onclick="saveCreds()">Save</button>
+      </div>
+    </div>
+
+    <div class="ocr-drop" id="ocr-drop">
+      <input type="file" id="ocr-file-input" accept="image/*" onchange="handleOcrFile(this.files[0])" />
+      <span class="ocr-drop-icon">🖼</span>
+      <div class="ocr-drop-lbl">Drop a run screenshot here or click to upload</div>
+    </div>
+
+    <div class="ocr-preview-wrap" id="ocr-preview-wrap">
+      <img id="ocr-preview-img" src="" alt="preview" />
+      <button class="ocr-preview-clear" onclick="clearOcrImage()">✕ Clear</button>
+    </div>
+
+    <div class="ocr-status" id="ocr-status"></div>
+    <button class="btn btn-ocr" id="btn-scan" onclick="runOcr()" disabled>🔍 SCAN SCREENSHOT</button>
+
+    <div class="ocr-results" id="ocr-results">
+      <div class="ocr-results-title">Detected Units &amp; Damage — edit if needed</div>
+      <div class="ocr-rows" id="ocr-rows"></div>
+      <div class="ocr-total-row" id="ocr-total-row"></div>
+      <button class="btn btn-apply" onclick="applyOcrToForm()">✔ APPLY TO FORM</button>
+    </div>
+  </div>
+
+  <div class="grid-2">
+
+    <div class="panel">
+      <div class="panel-title">＋ Add Team</div>
+      <div class="form-row">
+          <label class="form-label">Boss</label>
+          <select id="inp-boss">
+            <option>Boss 1</option><option>Boss 2</option><option>Boss 3</option>
+            <option>Boss 4</option><option>Boss 5</option><option value="—">— Any</option>
+          </select>
+        </div>
+      <div class="sec-head">Characters &amp; Per-Unit Damage</div>
+      <div class="char-slots" id="char-slots"></div>
+      <div class="total-row">
+        <span class="total-lbl">Calculated Total</span>
+        <span class="total-val" id="calc-total">—</span>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Override Score (optional — blank = use calculated)</label>
+        <input type="text" id="inp-override" placeholder="e.g. 4.795.896.805 or 4795896805 or 4.8B" />
+      </div>
+      <button class="btn btn-primary" onclick="addTeam()" style="width:100%">Add Team</button>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">◈ Team Roster</div>
+      <div class="stats-bar">
+        <div class="stat-chip">Teams: <span id="st-teams">0</span></div>
+        <div class="stat-chip">Locked: <span id="st-locked">0</span></div>
+        <div class="stat-chip">Conflicts: <span id="st-conflicts">0</span></div>
+      </div>
+      <div class="team-list-scroll">
+        <div id="team-list"><div class="empty-state">No teams yet.<br>Add your first team →</div></div>
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <div class="panel" style="max-width:440px;margin:0 auto;">
+    <div class="panel-title">⚡ Optimize · 3 Runs</div>
+    <p style="font-family:'Share Tech Mono',monospace;font-size:.7rem;color:var(--muted);margin-bottom:.5rem;">Lock teams you've already used, then click below.</p>
+    <div id="err-box" class="err-box"></div>
+    <button class="btn btn-optimize" onclick="optimize()">⚡ FIND OPTIMAL LINEUP</button>
+  </div>
+
+  <div id="results" style="display:none">
+    <hr class="divider">
+    <div class="res-header">▶ Optimal Lineup</div>
+    <div class="res-grid" id="res-grid"></div>
+    <div class="total-box">
+      <div class="total-box-lbl">Total Combined Damage</div>
+      <div class="total-box-val" id="total-damage">—</div>
+      <div class="total-box-full" id="total-damage-full"></div>
+    </div>
+  </div>
+</div>
+
+<div id="cs-floating">
+  <div class="cs-search"><input type="text" id="cs-search-inp" placeholder="Search or type custom name…" /></div>
+  <div class="cs-options" id="cs-options"></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ══════════════════════════════════════════
+   NUMBER PARSING
+   Handles all these formats:
+     4.795.896.805  → 4,795,896,805  (NIKKE dot-separator)
+     4795896805     → 4,795,896,805  (plain integer)
+     4.8B / 4.8b    → 4,800,000,000
+     4800M          → 4,800,000,000
+     4.795          → ambiguous; treated as dot-sep (4795) since
+                      decimals < 1 are never valid damage values
+══════════════════════════════════════════ */
+function parseScore(raw) {
+  if (raw === null || raw === undefined) return 0;
+  let s = String(raw).trim();
+  if (!s) return 0;
+
+  const lc = s.toLowerCase();
+
+  // shorthand suffixes first (must come before dot-strip)
+  const sfxMatch = lc.match(/^([\d.,]+)\s*([bBmMkK])$/);
+  if (sfxMatch) {
+    const num = sfxMatch[1].replace(/[.,]/g, match => {
+      // if there are multiple separators, they're thousand-seps → remove
+      // if there's a single dot/comma it could be decimal — handle below
+      return '';
+    });
+    // re-parse cleanly
+    const base = parseFloat(sfxMatch[1].replace(/[^0-9.]/g, '')) ||
+                 parseFloat(sfxMatch[1].replace(/[^0-9,]/g, '').replace(',','.')) || 0;
+    const sfx = sfxMatch[2].toLowerCase();
+    if (sfx === 'b') return base * 1e9;
+    if (sfx === 'm') return base * 1e6;
+    if (sfx === 'k') return base * 1e3;
+  }
+
+  // Detect dot-as-thousand-separator:
+  // Rule: if string matches /^\d{1,3}(\.\d{3})+$/ → dots are thousand-seps
+  // Also: multiple dots → all dots are thousand-seps
+  const dotCount = (s.match(/\./g) || []).length;
+  const commaCount = (s.match(/,/g) || []).length;
+
+  if (dotCount > 1) {
+    // e.g. 4.795.896.805  — strip all dots
+    return parseFloat(s.replace(/\./g, '')) || 0;
+  }
+  if (commaCount > 1) {
+    // e.g. 4,795,896,805  — strip all commas
+    return parseFloat(s.replace(/,/g, '')) || 0;
+  }
+  if (dotCount === 1 && commaCount === 0) {
+    // single dot: check if it's a thousand separator
+    // Pattern: digits.exactly3digits at end and nothing after
+    if (/^\d+\.\d{3}$/.test(s)) {
+      // ambiguous — in NIKKE context treat as thousand separator
+      // (damage is never < 1000, so 4.795 means 4795 not 4.795)
+      return parseFloat(s.replace('.', '')) || 0;
+    }
+    // otherwise it's a decimal point
+    return parseFloat(s) || 0;
+  }
+  if (commaCount === 1 && dotCount === 0) {
+    // single comma: check if thousand separator (X,XXX pattern)
+    if (/^\d+,\d{3}$/.test(s)) {
+      return parseFloat(s.replace(',', '')) || 0;
+    }
+    // treat as decimal separator
+    return parseFloat(s.replace(',', '.')) || 0;
+  }
+
+  // mixed: 1,234.567 or 1.234,567
+  if (dotCount === 1 && commaCount >= 1) {
+    // dot comes after comma → dot is decimal (1,234.56)
+    if (s.lastIndexOf('.') > s.lastIndexOf(',')) {
+      return parseFloat(s.replace(/,/g, '')) || 0;
+    }
+    // comma comes after dot → comma is decimal (1.234,56)
+    return parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0;
+  }
+
+  return parseFloat(s.replace(/[^0-9]/g, '')) || 0;
+}
+
+function fmtScore(n) {
+  if (!n) return '0';
+  if (n >= 1e9) return (n/1e9).toFixed(2).replace(/\.?0+$/,'')+'B';
+  if (n >= 1e6) return (n/1e6).toFixed(2).replace(/\.?0+$/,'')+'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1).replace(/\.?0+$/,'')+'K';
+  return Math.round(n).toLocaleString();
+}
+
+// Full dot-separated number (NIKKE style) for display in total box
+function fmtFull(n) {
+  return Math.round(n).toLocaleString('de-DE');
+}
+
+// "36 Billion" / "151 Million" word form
+function fmtWords(n) {
+  if (n >= 1e12) return (n/1e12).toFixed(2).replace(/\.?0+$/,'') + ' Trillion';
+  if (n >= 1e9)  return (n/1e9).toFixed(2).replace(/\.?0+$/,'')  + ' Billion';
+  if (n >= 1e6)  return (n/1e6).toFixed(2).replace(/\.?0+$/,'')  + ' Million';
+  if (n >= 1e3)  return (n/1e3).toFixed(1).replace(/\.?0+$/,'')  + ' Thousand';
+  return Math.round(n).toLocaleString();
+}
+
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function toast(msg){const el=document.getElementById('toast');el.textContent=msg;el.classList.add('on');setTimeout(()=>el.classList.remove('on'),2600);}
+
+/* ══════════════════════════════════════════
+   COMPLETE NIKKE CHARACTER LIST
+   ~200 characters as of early 2026
+   Sorted A–Z. Variants included separately.
+   "Add custom" fallback handles anything missing.
+══════════════════════════════════════════ */
+/* __CHARACTERS_PLACEHOLDER__ */
+
+/* ══════════════════════════════════════════
+   STATE
+══════════════════════════════════════════ */
+const RUNS = 3;
+const NUM_SLOTS = 5;
+const LS_KEY = 'union_raid_v2';
+let teams = [];
+let nextId = 1;
+let slotState = freshSlots();
+
+function freshSlots(){return Array.from({length:NUM_SLOTS},()=>({charName:null,damage:0}));}
+
+function saveStorage(){try{localStorage.setItem(LS_KEY,JSON.stringify({teams,nextId}));}catch(e){}}
+function loadStorage(){
+  try{
+    const d=JSON.parse(localStorage.getItem(LS_KEY)||'null');
+    if(d&&Array.isArray(d.teams)){teams=d.teams;nextId=d.nextId||(teams.length+1);}
+  }catch(e){}
+}
+
+/* ══════════════════════════════════════════
+   FLOATING DROPDOWN
+══════════════════════════════════════════ */
+// openSlotKey: number = form slot index, "ocr-N" = OCR slot index
+let openSlotKey = null;
+let ocrSlotState = []; // array of {charName, damage} for OCR result rows
+
+function slotTrigId(key){
+  return typeof key === 'number' ? 'cs-trig-'+key : 'ocr-trig-'+key.replace('ocr-','');
+}
+
+function openDropdown(key){
+  if(openSlotKey===key){closeDropdown();return;}
+  openSlotKey=key;
+  const floating=document.getElementById('cs-floating');
+  const trigger=document.getElementById(slotTrigId(key));
+  const rect=trigger.getBoundingClientRect();
+  floating.style.width=Math.max(230,rect.width)+'px';
+  floating.style.left=Math.min(rect.left,window.innerWidth-240)+'px';
+  const spaceBelow=window.innerHeight-rect.bottom;
+  if(spaceBelow>=365||spaceBelow>=window.innerHeight/2){
+    floating.style.top=(rect.bottom+4)+'px';floating.style.bottom='auto';
+  }else{
+    floating.style.bottom=(window.innerHeight-rect.top+4)+'px';floating.style.top='auto';
+  }
+  floating.classList.add('open');
+  trigger.classList.add('open');
+  const si=document.getElementById('cs-search-inp');
+  si.value='';clearArrowIdx();buildOptions('');
+  setTimeout(()=>si.focus(),40);
+}
+
+function closeDropdown(){
+  if(openSlotKey!==null){const t=document.getElementById(slotTrigId(openSlotKey));if(t)t.classList.remove('open');}
+  document.getElementById('cs-floating').classList.remove('open');
+  openSlotKey=null;
+}
+
+document.addEventListener('click',e=>{
+  if(!e.target.closest('#cs-floating')&&!e.target.closest('.cs-trigger'))closeDropdown();
+});
+
+window.addEventListener('scroll',e=>{
+  if(!e.target.closest || !e.target.closest('#cs-floating'))closeDropdown();
+},true);
+
+window.addEventListener('resize',closeDropdown);
+
+// Arrow key navigation state
+let arrowIdx = -1;
+
+function getNavItems(){
+  return Array.from(document.querySelectorAll('#cs-options .cs-opt:not(.none)'));
+}
+
+function setArrowIdx(idx){
+  const items = getNavItems();
+  if(idx < 0) idx = 0;
+  if(idx >= items.length) idx = items.length - 1;
+  arrowIdx = idx;
+  items.forEach((el,i) => { el.classList.toggle('arrow-hi', i === arrowIdx); });
+  if(items[arrowIdx]) items[arrowIdx].scrollIntoView({block:'nearest'});
+}
+
+function clearArrowIdx(){
+  arrowIdx = -1;
+  document.querySelectorAll('#cs-options .cs-opt.arrow-hi').forEach(el=>el.classList.remove('arrow-hi'));
+}
+
+document.getElementById('cs-search-inp').addEventListener('input', e => {
+  clearArrowIdx();
+  buildOptions(e.target.value);
+});
+document.getElementById('cs-search-inp').addEventListener('click',e=>e.stopPropagation());
+document.getElementById('cs-floating').addEventListener('click',e=>e.stopPropagation());
+
+document.getElementById('cs-search-inp').addEventListener('keydown',e=>{
+  if(e.key === 'ArrowDown'){
+    e.preventDefault(); setArrowIdx(arrowIdx + 1);
+  } else if(e.key === 'ArrowUp'){
+    e.preventDefault(); setArrowIdx(arrowIdx - 1);
+  } else if(e.key === 'Tab' || e.key === 'Enter'){
+    e.preventDefault();
+    const items = getNavItems();
+    const target = (arrowIdx >= 0 && items[arrowIdx]) ? items[arrowIdx] : items[0];
+    if(target) target.click();
+  } else if(e.key === 'Escape'){
+    closeDropdown();
+  }
+});
+
+function currentSlotCharName(){
+  if(openSlotKey===null) return null;
+  if(typeof openSlotKey === 'number') return slotState[openSlotKey]?.charName;
+  return ocrSlotState[parseInt(openSlotKey.replace('ocr-',''))]?.charName;
+}
+
+function buildOptions(filter){
+  const list=document.getElementById('cs-options');list.innerHTML='';
+  const f=filter.trim().toLowerCase();
+  const noneEl=document.createElement('div');
+  noneEl.className='cs-opt none';noneEl.textContent='— None —';
+  noneEl.addEventListener('click',()=>pickChar(null));list.appendChild(noneEl);
+  const filtered=f?CHARACTERS.filter(c=>c.toLowerCase().includes(f)):CHARACTERS;
+  const curName=currentSlotCharName();
+  filtered.forEach(name=>{
+    const el=document.createElement('div');
+    el.className='cs-opt'+(curName===name?' sel':'');el.textContent=name;
+    el.addEventListener('click',()=>pickChar(name));list.appendChild(el);
+  });
+  if(f&&!CHARACTERS.some(c=>c.toLowerCase()===f)){
+    const el=document.createElement('div');el.className='cs-opt custom';
+    el.textContent='Add "'+filter.trim()+'"';
+    el.addEventListener('click',()=>pickChar(filter.trim()));list.appendChild(el);
+  }
+}
+
+function pickChar(name){
+  if(openSlotKey===null)return;
+  const key=openSlotKey;
+  if(typeof key === 'number'){
+    slotState[key].charName=name||null;
+    refreshTrigger(key);
+  } else {
+    const idx=parseInt(key.replace('ocr-',''));
+    ocrSlotState[idx].charName=name||null;
+    refreshOcrTrigger(idx);
+  }
+  closeDropdown();
+}
+
+function refreshOcrTrigger(idx){
+  const el=document.getElementById('ocr-trig-'+idx);
+  if(!el)return;
+  const name=ocrSlotState[idx]?.charName||null;
+  el.innerHTML=name
+    ?`<span class="cs-trigger-label">${esc(name)}</span><span class="cs-trigger-arrow">▼</span>`
+    :`<span class="cs-trigger-label ph">Select unit…</span><span class="cs-trigger-arrow">▼</span>`;
+}
+
+/* ══════════════════════════════════════════
+   BUILD SLOTS
+══════════════════════════════════════════ */
+function buildSlots(){
+  const container=document.getElementById('char-slots');container.innerHTML='';
+  for(let i=0;i<NUM_SLOTS;i++){
+    const row=document.createElement('div');row.className='char-slot';
+    const trig=document.createElement('div');trig.className='cs-trigger';trig.id='cs-trig-'+i;
+    trig.addEventListener('click',e=>{e.stopPropagation();openDropdown(i);});
+    refreshTriggerEl(trig,slotState[i].charName,i);
+    const dmgWrap=document.createElement('div');dmgWrap.className='dmg-wrap';
+    const num=document.createElement('span');num.className='dmg-num';num.textContent='U'+(i+1);
+    const dmgInp=document.createElement('input');
+    dmgInp.type='text';dmgInp.id='dmg-'+i;
+    dmgInp.setAttribute('inputmode','numeric');dmgInp.placeholder='Damage…';
+    if(slotState[i].damage)dmgInp.value=slotState[i].damage;
+    dmgInp.addEventListener('input',()=>{slotState[i].damage=parseScore(dmgInp.value);refreshCalcTotal();});
+    dmgWrap.appendChild(num);dmgWrap.appendChild(dmgInp);
+    row.appendChild(trig);row.appendChild(dmgWrap);container.appendChild(row);
+  }
+  refreshCalcTotal();
+}
+
+function refreshTrigger(idx){const el=document.getElementById('cs-trig-'+idx);if(el)refreshTriggerEl(el,slotState[idx].charName,idx);}
+function refreshTriggerEl(el,name,idx){
+  el.innerHTML=name
+    ?`<span class="cs-trigger-label">${esc(name)}</span><span class="cs-trigger-arrow">▼</span>`
+    :`<span class="cs-trigger-label ph">Select unit ${idx+1}…</span><span class="cs-trigger-arrow">▼</span>`;
+}
+function refreshCalcTotal(){
+  const t=slotState.reduce((s,sl)=>s+(sl.damage||0),0);
+  document.getElementById('calc-total').textContent=t>0?fmtScore(t):'—';
+}
+
+/* ══════════════════════════════════════════
+   ADD TEAM
+══════════════════════════════════════════ */
+function addTeam(){
+  const boss=document.getElementById('inp-boss').value;
+  const overrideRaw=document.getElementById('inp-override').value.trim();
+  const chars=slotState.filter(s=>s.charName).map(s=>({name:s.charName,damage:s.damage}));
+  if(!chars.length){toast('Select at least 1 character');return;}
+  const calcTotal=slotState.reduce((s,sl)=>s+(sl.damage||0),0);
+  const score=overrideRaw?parseScore(overrideRaw):calcTotal;
+  if(score<=0){toast('Score is 0 — enter per-unit damage or an override score');return;}
+  // Auto-name: count existing teams for this boss
+  const bossTeams=teams.filter(t=>t.boss===boss).length;
+  const name=boss+' Team '+(bossTeams+1);
+  teams.push({id:nextId++,name,boss,score,chars,locked:false});
+  saveStorage();
+  document.getElementById('inp-override').value='';
+  slotState=freshSlots();buildSlots();renderTeams();
+  toast(`"${name}" added`);
+}
+
+/* ══════════════════════════════════════════
+   ROSTER
+══════════════════════════════════════════ */
+function toggleLock(id){const t=teams.find(t=>t.id===id);if(t){t.locked=!t.locked;saveStorage();renderTeams();}}
+function deleteTeam(id){teams=teams.filter(t=>t.id!==id);saveStorage();renderTeams();}
+
+function renderTeams(){
+  const list=document.getElementById('team-list');
+  if(!teams.length){list.innerHTML='<div class="empty-state">No teams yet.<br>Add your first team →</div>';}
+  else{
+    list.innerHTML=teams.map(t=>{
+      const charsHtml=t.chars.map(c=>{
+        const dmg=c.damage?`<span class="cdmg">${fmtScore(c.damage)}</span>`:'';
+        return `<span class="char-pill">${esc(c.name)}${dmg}</span>`;
+      }).join('');
+      return`<div class="team-card ${t.locked?'locked':''}">
+        <div class="tc-body">
+          <div class="tc-name">${esc(t.name)}</div>
+          <div class="tc-meta">${esc(t.boss)}</div>
+          <div class="tc-chars">${charsHtml}</div>
+        </div>
+        <div class="tc-actions">
+          <div class="tc-score">${fmtScore(t.score)}</div>
+          <button class="lock-btn ${t.locked?'on':''}" onclick="toggleLock(${t.id})">${t.locked?'🔒 Locked':'🔓 Lock'}</button>
+          <button class="btn btn-danger" onclick="deleteTeam(${t.id})">✕</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+  document.getElementById('st-teams').textContent=teams.length;
+  document.getElementById('st-locked').textContent=teams.filter(t=>t.locked).length;
+  const cnt={};teams.forEach(t=>t.chars.forEach(c=>{const k=c.name.toLowerCase();cnt[k]=(cnt[k]||0)+1;}));
+  document.getElementById('st-conflicts').textContent=Object.values(cnt).filter(v=>v>1).length;
+}
+
+/* ══════════════════════════════════════════
+   OPTIMIZER
+══════════════════════════════════════════ */
+function optimize(){
+  const errEl=document.getElementById('err-box');errEl.classList.remove('on');
+  if(teams.length<RUNS){errEl.textContent=`Need at least ${RUNS} teams. You have ${teams.length}.`;return errEl.classList.add('on');}
+  const locked=teams.filter(t=>t.locked);const free=teams.filter(t=>!t.locked);
+  if(locked.length>RUNS){errEl.textContent=`Too many locked teams (${locked.length}) for ${RUNS} runs.`;return errEl.classList.add('on');}
+  const lcC=findConflicts(locked);
+  if(lcC.length){errEl.textContent=`Locked teams share: ${lcC.join(', ')}`;return errEl.classList.add('on');}
+  const lockedChars=new Set(locked.flatMap(t=>t.chars.map(c=>c.name.toLowerCase())));
+  const best=findBestCombo(free,RUNS-locked.length,lockedChars);
+  if(!best){errEl.textContent='No conflict-free combination found. Add more teams or adjust locked teams.';return errEl.classList.add('on');}
+  renderResults([...locked,...best]);
+}
+
+function findConflicts(ts){const seen=new Set(),out=new Set();ts.forEach(t=>t.chars.forEach(c=>{const k=c.name.toLowerCase();if(seen.has(k))out.add(c.name);seen.add(k);}));return[...out];}
+function findBestCombo(pool,k,excl){
+  if(k===0)return[];let best=null,bs=-1;
+  combos(pool,k).forEach(combo=>{
+    const chars=combo.flatMap(t=>t.chars.map(c=>c.name.toLowerCase()));
+    const cs=new Set(chars);if(cs.size<chars.length)return;
+    for(const c of cs)if(excl.has(c))return;
+    const tot=combo.reduce((s,t)=>s+t.score,0);if(tot>bs){bs=tot;best=combo;}
+  });return best;
+}
+function combos(arr,k){const r=[];function go(s,cur){if(cur.length===k){r.push([...cur]);return;}for(let i=s;i<arr.length;i++){cur.push(arr[i]);go(i+1,cur);cur.pop();}}go(0,[]);return r;}
+
+/* ══════════════════════════════════════════
+   RESULTS
+══════════════════════════════════════════ */
+function renderResults(final){
+  const total=final.reduce((s,t)=>s+t.score,0);
+  document.getElementById('res-grid').innerHTML=final.map((t,i)=>{
+    const ch=t.chars.map(c=>{
+      const dmg=c.damage?`<span class="rd">${fmtScore(c.damage)}</span>`:'';
+      return`<div class="res-char">${esc(c.name)}${dmg}</div>`;
+    }).join('');
+    return`<div class="res-card">
+      <div class="res-rank">RUN ${i+1}</div>
+      ${t.locked?'<div class="res-locked">🔒 LOCKED</div>':''}
+      <div class="res-name">${esc(t.name)}</div>
+      <div class="res-boss">${esc(t.boss)}</div>
+      <div class="res-score">${fmtScore(t.score)}</div>
+      <div class="res-chars">${ch}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('total-damage').textContent=fmtScore(total);
+  document.getElementById('total-damage-full').textContent=fmtFull(total)+' · '+fmtWords(total);
+  const el=document.getElementById('results');el.style.display='block';
+  el.scrollIntoView({behavior:'smooth',block:'start'});
+  toast('Optimal lineup found!');
+}
+
+/* ══════════════════════════════════════════
+   OCR — CLOUDFLARE WORKERS AI
+   Model: @cf/meta/llama-3.2-11b-vision-instruct
+══════════════════════════════════════════ */
+const WORKER_URL = '/ocr';
+const CF_CREDS_KEY = 'cf_ocr_auth_v1';
+let ocrImageBase64 = null;
+let ocrImageMime   = 'image/jpeg';
+
+function loadCreds(){
+  try{
+    const d=JSON.parse(localStorage.getItem(CF_CREDS_KEY)||'null');
+    if(d){
+      if(d.user) document.getElementById('ocr-user').value=d.user;
+      if(d.pass) document.getElementById('ocr-pass').value=d.pass;
+    }
+  }catch(e){}
+}
+
+function saveCreds(){
+  const user=document.getElementById('ocr-user').value.trim();
+  const pass=document.getElementById('ocr-pass').value;
+  if(!user||!pass){toast('Enter username and password');return;}
+  localStorage.setItem(CF_CREDS_KEY,JSON.stringify({user,pass}));
+  toast('Credentials saved');
+  document.getElementById('creds-body').classList.remove('on');
+  document.getElementById('creds-arrow').textContent='▶';
+}
+
+function getBasicAuth(){
+  try{
+    const d=JSON.parse(localStorage.getItem(CF_CREDS_KEY)||'null');
+    if(d?.user&&d?.pass) return 'Basic '+btoa(d.user+':'+d.pass);
+  }catch(e){}
+  return null;
+}
+
+function toggleCreds(){
+  const body=document.getElementById('creds-body');
+  const arrow=document.getElementById('creds-arrow');
+  const on=body.classList.toggle('on');
+  arrow.textContent=on?'▼':'▶';
+}
+
+function setOcrStatus(msg,cls=''){
+  const el=document.getElementById('ocr-status');
+  el.textContent=msg;el.className='ocr-status'+(cls?' '+cls:'');
+}
+
+function handleOcrFile(file){
+  if(!file)return;
+  ocrImageMime=file.type||'image/jpeg';
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const dataUrl=e.target.result;
+    ocrImageBase64=dataUrl.split(',')[1];
+    document.getElementById('ocr-preview-img').src=dataUrl;
+    document.getElementById('ocr-preview-wrap').style.display='block';
+    document.getElementById('ocr-drop').style.display='none';
+    document.getElementById('btn-scan').disabled=false;
+    document.getElementById('ocr-results').classList.remove('on');
+    setOcrStatus('Image loaded — click Scan to extract units');
+  };
+  reader.readAsDataURL(file);
+}
+
+// drag and drop on the drop zone
+(function(){
+  const dz=document.getElementById('ocr-drop');
+  dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag');});
+  dz.addEventListener('dragleave',()=>dz.classList.remove('drag'));
+  dz.addEventListener('drop',e=>{
+    e.preventDefault();dz.classList.remove('drag');
+    const f=e.dataTransfer.files[0];if(f)handleOcrFile(f);
+  });
+})();
+
+function clearOcrImage(){
+  ocrImageBase64=null;
+  document.getElementById('ocr-preview-wrap').style.display='none';
+  document.getElementById('ocr-drop').style.display='block';
+  document.getElementById('ocr-file-input').value='';
+  document.getElementById('btn-scan').disabled=true;
+  document.getElementById('ocr-results').classList.remove('on');
+  setOcrStatus('');
+}
+
+async function runOcr(){
+  const auth=getBasicAuth();
+  if(!auth){
+    toast('Enter OCR credentials first');
+    document.getElementById('creds-body').classList.add('on');
+    document.getElementById('creds-arrow').textContent='▼';
+    return;
+  }
+  if(!ocrImageBase64){toast('Upload a screenshot first');return;}
+
+  const btn=document.getElementById('btn-scan');
+  btn.disabled=true;
+  setOcrStatus('⏳ Sending to Cloudflare AI…');
+  document.getElementById('ocr-results').classList.remove('on');
+
+  try{
+    const resp=await fetch(WORKER_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':auth},
+      body:JSON.stringify({image:ocrImageBase64, mime:ocrImageMime})
+    });
+    if(resp.status===401){
+      setOcrStatus('✖ Invalid credentials. Click "OCR Authentication" to update them.','err');
+      btn.disabled=false;return;
+    }
+    const json=await resp.json();
+    if(!resp.ok||!json.ok){
+      throw new Error(json.error||'Worker returned an error');
+    }
+    parseAndShowOcrResults(typeof json.result === 'string' ? json.result : JSON.stringify(json.result||''));
+  }catch(err){
+    setOcrStatus('✖ '+err.message,'err');
+    btn.disabled=false;
+  }
+}
+
+function bestCharMatch(raw){
+  if(!raw) return null;
+  const r=raw.toLowerCase().trim();
+  // exact
+  let m=CHARACTERS.find(c=>c.toLowerCase()===r);
+  if(m) return m;
+  // OCR often sees only the suffix after ": " — try matching the part after colon
+  // e.g. "Agent Bunny" → "Ade: Agent Bunny"
+  m=CHARACTERS.find(c=>c.toLowerCase().includes(': '+r));
+  if(m) return m;
+  // raw contains the character name
+  m=CHARACTERS.find(c=>c.toLowerCase().includes(r));
+  if(m) return m;
+  // character name is contained in raw
+  m=CHARACTERS.find(c=>r.includes(c.toLowerCase()));
+  if(m) return m;
+  // word-level overlap: find character whose words are mostly present in raw
+  const rawWords=r.split(/\s+/);
+  let best=null, bestScore=0;
+  CHARACTERS.forEach(c=>{
+    const cWords=c.toLowerCase().split(/[\s:]+/);
+    const hits=cWords.filter(w=>w.length>2&&rawWords.some(rw=>rw.includes(w)||w.includes(rw))).length;
+    const score=hits/cWords.length;
+    if(score>0.5&&score>bestScore){bestScore=score;best=c;}
+  });
+  return best||raw; // fall back to raw if nothing found
+}
+
+function parseAndShowOcrResults(rawText){
+  const btn=document.getElementById('btn-scan');
+  let jsonStr=rawText;
+  const fence=rawText.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if(fence) jsonStr=fence[1];
+  const bracket=jsonStr.match(/\[[\s\S]*\]/);
+  if(bracket) jsonStr=bracket[0];
+
+  let items=[];
+  try{items=JSON.parse(jsonStr);}
+  catch(e){
+    setOcrStatus('✖ Could not parse AI response. Try again or crop the screenshot tighter.','err');
+    btn.disabled=false;return;
+  }
+  if(!Array.isArray(items)||!items.length){
+    setOcrStatus('✖ No units detected. Make sure the screenshot shows character names and scores.','err');
+    btn.disabled=false;return;
+  }
+
+  const unitRows=items.filter(r=>r.name!=='__total__');
+  const totalRow=items.find(r=>r.name==='__total__');
+
+  // Build ocrSlotState from matched names
+  ocrSlotState = unitRows.slice(0,5).map(r=>({
+    charName: bestCharMatch(r.name),
+    damage: r.damage||''
+  }));
+
+  // Render rows with dropdowns
+  const rowsEl=document.getElementById('ocr-rows');
+  rowsEl.innerHTML='';
+  ocrSlotState.forEach((s,i)=>{
+    const row=document.createElement('div');row.className='ocr-row';
+    // dropdown trigger
+    const trig=document.createElement('div');
+    trig.className='cs-trigger';trig.id='ocr-trig-'+i;
+    trig.innerHTML=s.charName
+      ?`<span class="cs-trigger-label">${esc(s.charName)}</span><span class="cs-trigger-arrow">▼</span>`
+      :`<span class="cs-trigger-label ph">Select unit…</span><span class="cs-trigger-arrow">▼</span>`;
+    trig.addEventListener('click',e=>{e.stopPropagation();openDropdown('ocr-'+i);});
+    // damage input
+    const dmgWrap=document.createElement('div');dmgWrap.className='dmg-wrap';
+    const dmgInp=document.createElement('input');
+    dmgInp.type='text';dmgInp.className='ocr-row-dmg';dmgInp.id='ocr-d-'+i;
+    dmgInp.value=s.damage;dmgInp.placeholder='Damage';
+    dmgInp.addEventListener('input',()=>{ ocrSlotState[i].damage=dmgInp.value; });
+    dmgWrap.appendChild(dmgInp);
+    // delete button
+    const del=document.createElement('button');
+    del.className='ocr-row-del';del.textContent='✕';
+    del.addEventListener('click',()=>{
+      ocrSlotState.splice(i,1);
+      // re-render remaining
+      const currentDmgValues=Array.from(document.querySelectorAll('.ocr-row-dmg')).map(el=>el.value);
+      ocrSlotState.forEach((s2,j)=>{s2.damage=currentDmgValues[j]||s2.damage;});
+      parseAndShowOcrResultsFromState();
+    });
+    row.appendChild(trig);row.appendChild(dmgWrap);row.appendChild(del);
+    rowsEl.appendChild(row);
+  });
+
+  // total row
+  const totEl=document.getElementById('ocr-total-row');
+  const unitSum=ocrSlotState.reduce((s,u)=>s+parseScore(u.damage),0);
+  if(unitSum>0){totEl.innerHTML=`Total detected: <span>${fmtScore(unitSum)}</span>`;totEl.style.display='flex';}
+  else{totEl.style.display='none';}
+
+  document.getElementById('ocr-results').classList.add('on');
+  setOcrStatus('✔ Scan complete. Edit if needed, then Apply.','ok');
+  btn.disabled=false;
+}
+
+// Re-render rows from current ocrSlotState (used after deletion)
+function parseAndShowOcrResultsFromState(){
+  const rowsEl=document.getElementById('ocr-rows');
+  rowsEl.innerHTML='';
+  ocrSlotState.forEach((s,i)=>{
+    const row=document.createElement('div');row.className='ocr-row';
+    const trig=document.createElement('div');
+    trig.className='cs-trigger';trig.id='ocr-trig-'+i;
+    trig.innerHTML=s.charName
+      ?`<span class="cs-trigger-label">${esc(s.charName)}</span><span class="cs-trigger-arrow">▼</span>`
+      :`<span class="cs-trigger-label ph">Select unit…</span><span class="cs-trigger-arrow">▼</span>`;
+    trig.addEventListener('click',e=>{e.stopPropagation();openDropdown('ocr-'+i);});
+    const dmgWrap=document.createElement('div');dmgWrap.className='dmg-wrap';
+    const dmgInp=document.createElement('input');
+    dmgInp.type='text';dmgInp.className='ocr-row-dmg';dmgInp.id='ocr-d-'+i;
+    dmgInp.value=s.damage;dmgInp.placeholder='Damage';
+    dmgInp.addEventListener('input',()=>{ ocrSlotState[i].damage=dmgInp.value; });
+    dmgWrap.appendChild(dmgInp);
+    const del=document.createElement('button');
+    del.className='ocr-row-del';del.textContent='✕';
+    del.addEventListener('click',()=>{
+      ocrSlotState.splice(i,1);
+      parseAndShowOcrResultsFromState();
+    });
+    row.appendChild(trig);row.appendChild(dmgWrap);row.appendChild(del);
+    rowsEl.appendChild(row);
+  });
+}
+
+function applyOcrToForm(){
+  // sync damage values from DOM before applying
+  document.querySelectorAll('.ocr-row-dmg').forEach((el,i)=>{
+    if(ocrSlotState[i]) ocrSlotState[i].damage=el.value;
+  });
+  const units=ocrSlotState.filter(s=>s.charName);
+  if(!units.length){toast('No units to apply');return;}
+
+  slotState=freshSlots();
+  units.slice(0,NUM_SLOTS).forEach((u,i)=>{
+    slotState[i].charName=u.charName;
+    slotState[i].damage=parseScore(u.damage);
+  });
+  buildSlots();
+  units.slice(0,NUM_SLOTS).forEach((u,i)=>{
+    const inp=document.getElementById('dmg-'+i);
+    if(inp&&u.damage) inp.value=u.damage;
+  });
+  refreshCalcTotal();
+  toast(`Applied ${Math.min(units.length,NUM_SLOTS)} units to form`);
+  document.querySelector('.grid-2').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+/* ══ INIT ══ */
+loadStorage();loadCreds();buildSlots();renderTeams();
+</script>
+</body>
+</html>

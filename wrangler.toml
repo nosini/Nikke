@@ -1,0 +1,16 @@
+name = "nikke-union-raid"
+main = "src/worker.js"
+compatibility_date = "2024-01-01"
+
+# Import page.html as a text module so the worker can serve it
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+
+# Workers AI binding
+[[ai]]
+binding = "AI"
+
+# Set these as secrets via:
+#   wrangler secret put OCR_USER
+#   wrangler secret put OCR_PASS
