@@ -6,10 +6,13 @@
  *
  * Bindings (Settings → Bindings):
  *   AI   — Workers AI
+ *   DB   — D1 Database (database_name = "ocr-logs")
  *
  * Secrets (Settings → Variables → Secret variables):
- *   OCR_USER — Basic Auth username
- *   OCR_PASS — Basic Auth password
+ *   OCR_USER   — your personal admin username
+ *   OCR_PASS   — your personal admin password
+ *   UNION_USER — shared guild username
+ *   UNION_PASS — shared guild password
  */
 
 import { CHARACTERS } from './characters.js';
@@ -28,7 +31,7 @@ const SECURITY_HEADERS = {
   'Referrer-Policy':        'no-referrer',
 };
 
-// ── Auth ─────────────────────────────────────────────────────────────
+// ── Auth ──────────────────────────────────────────────────────────────
 const encoder = new TextEncoder();
 
 function timingSafeEqual(a, b) {
@@ -42,27 +45,54 @@ function timingSafeEqual(a, b) {
   return crypto.subtle.timingSafeEqual(aBytes, bBytes);
 }
 
-function checkAuth(request, env) {
+// Returns 'admin' | 'union' | null — null means auth failed
+function authenticate(request, env) {
   try {
     const header = request.headers.get('Authorization') || '';
-    if (!header.startsWith('Basic ')) return false;
+    if (!header.startsWith('Basic ')) return null;
     const decoded = atob(header.slice(6));
     const colon   = decoded.indexOf(':');
-    if (colon === -1) return false;
+    if (colon === -1) return null;
     const user = decoded.slice(0, colon);
     const pass = decoded.slice(colon + 1);
-    // Admin account
+    // Always run both comparisons — short-circuiting would leak timing info
     const isAdmin = timingSafeEqual(user, env.OCR_USER)
                  && timingSafeEqual(pass, env.OCR_PASS);
-    if (isAdmin) return true;
-    // Union account — separate credentials shared with guild members
-    // Add secrets via: wrangler secret put UNION_USER / wrangler secret put UNION_PASS
     const isUnion = timingSafeEqual(user, env.UNION_USER)
                  && timingSafeEqual(pass, env.UNION_PASS);
-    return isUnion;
+    if (isAdmin) return 'admin';
+    if (isUnion) return 'union';
+    return null;
   } catch {
-    return false; // malformed base64
+    return null; // malformed base64
   }
+}
+
+// ── D1 Logging ────────────────────────────────────────────────────────
+// Runs after the response is sent (ctx.waitUntil) so it never slows down
+// the OCR response. Fails silently — a logging error must never break OCR.
+function auditLog(ctx, env, fields) {
+  if (!env.DB) return; // D1 not bound — skip silently
+  ctx.waitUntil(
+    env.DB.prepare(`
+      INSERT INTO audit_logs
+        (timestamp, ip, country, cf_ray, user_agent, role, status_code, ai_ok, error_msg, image_bytes, duration_ms)
+      VALUES
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      new Date().toISOString(),
+      fields.ip          ?? null,
+      fields.country     ?? null,
+      fields.cfRay       ?? null,
+      fields.userAgent   ?? null,
+      fields.role        ?? null,   // 'admin' | 'union' | null (unauthenticated)
+      fields.statusCode  ?? null,
+      fields.aiOk        ?? null,   // 1 = success, 0 = AI error, null = didn't reach AI
+      fields.errorMsg    ?? null,
+      fields.imageBytes  ?? null,
+      fields.durationMs  ?? null,
+    ).run().catch(() => {}) // swallow D1 errors — never propagate to user
+  );
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -77,7 +107,7 @@ function unauthorized() {
   return new Response(JSON.stringify({ error: 'Unauthorized' }), {
     status: 401,
     headers: {
-      'Content-Type':    'application/json',
+      'Content-Type':     'application/json',
       'WWW-Authenticate': 'Basic realm="NIKKE OCR"',
       ...SECURITY_HEADERS,
     },
@@ -99,7 +129,6 @@ function bytesToBase64(bytes) {
 // ── Page handler ──────────────────────────────────────────────────────
 function servePage() {
   // Inject the character list from characters.js so the page never goes stale.
-  // The placeholder comment is replaced with a real JS assignment.
   const injected = PAGE_HTML.replace(
     '/* __CHARACTERS_PLACEHOLDER__ */',
     `const CHARACTERS = ${JSON.stringify(CHARACTERS)};`,
@@ -114,20 +143,35 @@ function servePage() {
 }
 
 // ── OCR handler ───────────────────────────────────────────────────────
-async function handleOcr(request, env) {
-  if (!checkAuth(request, env)) return unauthorized();
+async function handleOcr(request, env, ctx) {
+  const t0      = Date.now();
+  const ip      = request.headers.get('cf-connecting-ip');
+  const country = request.cf?.country ?? null;
+  const cfRay   = request.headers.get('cf-ray');
+  const ua      = request.headers.get('user-agent');
+
+  const role = authenticate(request, env);
+  if (!role) {
+    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role: null, statusCode: 401, durationMs: Date.now() - t0 });
+    return unauthorized();
+  }
 
   // Content-Length fast path (client-supplied, verified again below)
   const declaredLength = parseInt(request.headers.get('Content-Length') || '0', 10);
   if (declaredLength > MAX_BODY_BYTES) {
+    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role, statusCode: 413, durationMs: Date.now() - t0 });
     return jsonResp({ error: 'Request body too large (max 5 MB)' }, 413);
   }
 
   let bodyBytes;
   try   { bodyBytes = await request.arrayBuffer(); }
-  catch { return jsonResp({ error: 'Failed to read request body' }, 400); }
+  catch {
+    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role, statusCode: 400, errorMsg: 'body_read_failed', durationMs: Date.now() - t0 });
+    return jsonResp({ error: 'Failed to read request body' }, 400);
+  }
 
   if (bodyBytes.byteLength > MAX_BODY_BYTES) {
+    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role, statusCode: 413, durationMs: Date.now() - t0 });
     return jsonResp({ error: 'Request body too large (max 5 MB)' }, 413);
   }
 
@@ -137,27 +181,33 @@ async function handleOcr(request, env) {
   if (contentType.includes('application/json')) {
     let body;
     try   { body = JSON.parse(new TextDecoder().decode(bodyBytes)); }
-    catch { return jsonResp({ error: 'Invalid JSON' }, 400); }
+    catch {
+      auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role, statusCode: 400, errorMsg: 'invalid_json', durationMs: Date.now() - t0 });
+      return jsonResp({ error: 'Invalid JSON' }, 400);
+    }
     imageBase64 = body.image;
     imageMime   = body.mime || 'image/jpeg';
   } else if (contentType.includes('multipart/form-data')) {
-    const clone = new Request(request.url, {
-      method: 'POST', headers: request.headers, body: bodyBytes,
-    });
+    const clone = new Request(request.url, { method: 'POST', headers: request.headers, body: bodyBytes });
     let form;
     try   { form = await clone.formData(); }
-    catch { return jsonResp({ error: 'Invalid multipart form data' }, 400); }
+    catch {
+      auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role, statusCode: 400, errorMsg: 'invalid_multipart', durationMs: Date.now() - t0 });
+      return jsonResp({ error: 'Invalid multipart form data' }, 400);
+    }
     const file = form.get('image');
     if (!file) return jsonResp({ error: 'No image field in form data' }, 400);
     const bytes = await file.arrayBuffer();
     imageBase64 = bytesToBase64(new Uint8Array(bytes));
     imageMime   = file.type || 'image/jpeg';
   } else {
+    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role, statusCode: 400, errorMsg: 'bad_content_type', durationMs: Date.now() - t0 });
     return jsonResp({ error: 'Expected application/json or multipart/form-data' }, 400);
   }
 
   const normalizedMime = (imageMime || '').toLowerCase().split(';')[0].trim();
   if (!ALLOWED_MIME.has(normalizedMime)) {
+    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role, statusCode: 415, errorMsg: `bad_mime:${normalizedMime}`, durationMs: Date.now() - t0 });
     return jsonResp({ error: `Unsupported image type: ${normalizedMime}` }, 415);
   }
 
@@ -165,9 +215,13 @@ async function handleOcr(request, env) {
 
   let imageBytes;
   try   { imageBytes = Uint8Array.from(atob(imageBase64), c => c.charCodeAt(0)); }
-  catch { return jsonResp({ error: 'Invalid base64 image data' }, 400); }
+  catch {
+    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role, statusCode: 400, errorMsg: 'bad_base64', durationMs: Date.now() - t0 });
+    return jsonResp({ error: 'Invalid base64 image data' }, 400);
+  }
 
   if (imageBytes.length > MAX_BODY_BYTES) {
+    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role, statusCode: 413, imageBytes: imageBytes.length, durationMs: Date.now() - t0 });
     return jsonResp({ error: 'Decoded image too large (max 5 MB)' }, 413);
   }
 
@@ -211,18 +265,32 @@ Rules:
       }
     }
 
+    auditLog(ctx, env, {
+      ip, country, cfRay, userAgent: ua, role,
+      statusCode: 200, aiOk: 1,
+      imageBytes: imageBytes.length,
+      durationMs: Date.now() - t0,
+    });
+
     return jsonResp({
       ok: true,
       result: response.description ?? response.response ?? JSON.stringify(response),
     });
   } catch (err) {
+    auditLog(ctx, env, {
+      ip, country, cfRay, userAgent: ua, role,
+      statusCode: 500, aiOk: 0,
+      errorMsg: err.message.slice(0, 200),
+      imageBytes: imageBytes.length,
+      durationMs: Date.now() - t0,
+    });
     return jsonResp({ ok: false, error: err.message }, 500);
   }
 }
 
 // ── Router ────────────────────────────────────────────────────────────
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     try {
       const url    = new URL(request.url);
       const method = request.method;
@@ -238,13 +306,11 @@ export default {
         });
       }
 
-      if (url.pathname === '/' && method === 'GET')         return servePage();
-      if (url.pathname === '/ocr' && method === 'POST')     return handleOcr(request, env);
+      if (url.pathname === '/' && method === 'GET')     return servePage();
+      if (url.pathname === '/ocr' && method === 'POST') return handleOcr(request, env, ctx);
 
       return new Response('Not found', { status: 404, headers: SECURITY_HEADERS });
     } catch (err) {
-      // Never let an unhandled crash return Cloudflare's HTML error page —
-      // always return JSON so the client can surface the real error message
       return new Response(JSON.stringify({ ok: false, error: err.message }), {
         status: 500,
         headers: { 'Content-Type': 'application/json', ...SECURITY_HEADERS },
