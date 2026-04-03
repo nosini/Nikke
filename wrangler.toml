@@ -11,6 +11,14 @@ globs = ["**/*.html"]
 [ai]
 binding = "AI"
 
+# D1 audit log database
+# Create with: npx wrangler d1 create ocr-logs
+# Then replace database_id below with the ID it prints
+[[d1_databases]]
+binding      = "DB"
+database_name = "ocr-logs"
+database_id  = "2a7f71a5-5cf0-4f06-b99a-110269ebba4c"
+
 # Custom domain — domain must be on Cloudflare (proxied)
 [[routes]]
 pattern = "nikke.driftmail.eu/*"
