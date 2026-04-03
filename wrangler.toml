@@ -13,7 +13,7 @@ binding = "AI"
 
 # Custom domain — domain must be on Cloudflare (proxied)
 [[routes]]
-pattern = "nikke.domain.com"
+pattern = "nikke.domain.com/*"
 zone_name = "domain.com"
 
 [observability]

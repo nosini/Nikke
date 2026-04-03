@@ -12,7 +12,7 @@ export const CHARACTERS = [
   "Anchor", "Anchor: Innocent Maid",
   "Anis", "Anis: Sparkling Summer",
   "Anne: Miracle Fairy",
-  "Arcana",
+  "Arcana", "Arcana: Fortune Mate",
   "Aria",
   "Asuka Shikinami Langley", "Asuka Shikinami Langley: Wille",
   "Bay",
