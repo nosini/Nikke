@@ -16,6 +16,13 @@ binding = "AI"
 pattern = "nikke.driftmail.eu"
 zone_name = "driftmail.eu"
 
+[observability]
+[observability.traces]
+enabled = true
+[observability.logs]
+enabled = true
+invocation_logs = true
+
 # Set these as secrets via:
 #   wrangler secret put OCR_USER
 #   wrangler secret put OCR_PASS
