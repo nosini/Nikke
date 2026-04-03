@@ -11,6 +11,11 @@ globs = ["**/*.html"]
 [ai]
 binding = "AI"
 
+# Custom domain — domain must be on Cloudflare (proxied)
+[[routes]]
+pattern = "nikke.driftmail.eu"
+zone_name = "driftmail.eu"
+
 # Set these as secrets via:
 #   wrangler secret put OCR_USER
 #   wrangler secret put OCR_PASS
