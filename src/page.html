@@ -819,11 +819,17 @@ async function runOcr(){
       headers:{'Content-Type':'application/json','Authorization':auth},
       body:JSON.stringify({image:ocrImageBase64, mime:ocrImageMime})
     });
+    const rawText = await resp.text();
     if(resp.status===401){
       setOcrStatus('✖ Invalid credentials. Click "OCR Authentication" to update them.','err');
       btn.disabled=false;return;
     }
-    const json=await resp.json();
+    let json;
+    try{ json=JSON.parse(rawText); }
+    catch(e){
+      // Show the first 300 chars of what the server actually sent — useful for debugging
+      throw new Error(`Server returned non-JSON (HTTP ${resp.status}): ${rawText.slice(0,300)}`);
+    }
     if(!resp.ok||!json.ok){
       throw new Error(json.error||'Worker returned an error');
     }
