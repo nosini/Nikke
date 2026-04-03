@@ -27,30 +27,44 @@ wrangler.toml    — Cloudflare Workers config
 ### Deploy
 
 ```bash
-# Clone and install
+# Clone
 git clone https://github.com/yourname/nikke-union-raid.git
 cd nikke-union-raid
 
 # Log in to Cloudflare
 wrangler login
 
-# Set auth credentials (you'll be prompted to enter values)
-wrangler secret put OCR_USER
-wrangler secret put OCR_PASS
+# Create the D1 database — copy the database_id it prints into wrangler.toml
+npx wrangler d1 create ocr-logs
+
+# Apply the schema
+npx wrangler d1 execute ocr-logs --remote --file=./schema.sql
+
+# Set secrets
+wrangler secret put OCR_USER    # your personal admin username
+wrangler secret put OCR_PASS    # your personal admin password
+wrangler secret put UNION_USER  # shared guild username
+wrangler secret put UNION_PASS  # shared guild password
 
 # Deploy
 wrangler deploy
 ```
 
-The worker will be live at `https://nikke-union-raid.<your-subdomain>.workers.dev`.
+### Querying the audit log
 
-### Bindings
+```bash
+# All requests in the last 24 hours
+npx wrangler d1 execute ocr-logs --remote --command \
+  "SELECT timestamp, ip, country, role, status_code, ai_ok, duration_ms FROM audit_logs ORDER BY timestamp DESC LIMIT 50"
 
-The `wrangler.toml` already declares the Workers AI binding. No manual setup needed when using `wrangler deploy`.
+# All failed auth attempts
+npx wrangler d1 execute ocr-logs --remote --command \
+  "SELECT timestamp, ip, country FROM audit_logs WHERE role IS NULL ORDER BY timestamp DESC"
 
-If deploying via the Cloudflare dashboard instead:
-1. Workers & Pages → your worker → Settings → Bindings
-2. Add binding: Type **Workers AI**, Variable name **`AI`**
+# Requests by a specific IP
+npx wrangler d1 execute ocr-logs --remote --command \
+  "SELECT * FROM audit_logs WHERE ip = '1.2.3.4' ORDER BY timestamp DESC"
+```
 
 ## Adding new characters
 
