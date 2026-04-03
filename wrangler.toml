@@ -8,7 +8,7 @@ type = "Text"
 globs = ["**/*.html"]
 
 # Workers AI binding
-[[ai]]
+[ai]
 binding = "AI"
 
 # Set these as secrets via:
