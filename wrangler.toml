@@ -13,7 +13,7 @@ binding = "AI"
 
 # Custom domain — domain must be on Cloudflare (proxied)
 [[routes]]
-pattern = "nikke.driftmail.eu"
+pattern = "nikke.driftmail.eu/*"
 zone_name = "driftmail.eu"
 
 [observability]
