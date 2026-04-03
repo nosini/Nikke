@@ -49,9 +49,17 @@ function checkAuth(request, env) {
     const decoded = atob(header.slice(6));
     const colon   = decoded.indexOf(':');
     if (colon === -1) return false;
-    // Use indexOf not split(':') — split breaks if password contains a colon
-    return timingSafeEqual(decoded.slice(0, colon),  env.OCR_USER)
-        && timingSafeEqual(decoded.slice(colon + 1), env.OCR_PASS);
+    const user = decoded.slice(0, colon);
+    const pass = decoded.slice(colon + 1);
+    // Admin account
+    const isAdmin = timingSafeEqual(user, env.OCR_USER)
+                 && timingSafeEqual(pass, env.OCR_PASS);
+    if (isAdmin) return true;
+    // Union account — separate credentials shared with guild members
+    // Add secrets via: wrangler secret put UNION_USER / wrangler secret put UNION_PASS
+    const isUnion = timingSafeEqual(user, env.UNION_USER)
+                 && timingSafeEqual(pass, env.UNION_PASS);
+    return isUnion;
   } catch {
     return false; // malformed base64
   }
