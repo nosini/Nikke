@@ -32,11 +32,11 @@ const SECURITY_HEADERS = {
 const encoder = new TextEncoder();
 
 function timingSafeEqual(a, b) {
-  const aBytes = encoder.encode(a);
-  const bBytes = encoder.encode(b);
+  // Guard against undefined secrets — treat missing as empty string so we
+  // still do a constant-time comparison rather than crashing
+  const aBytes = encoder.encode(typeof a === 'string' ? a : '');
+  const bBytes = encoder.encode(typeof b === 'string' ? b : '');
   if (aBytes.byteLength !== bBytes.byteLength) {
-    // Compare against self (always true) then negate —
-    // avoids returning early which would leak the secret length via timing.
     return !crypto.subtle.timingSafeEqual(aBytes, aBytes);
   }
   return crypto.subtle.timingSafeEqual(aBytes, bBytes);
@@ -215,23 +215,32 @@ Rules:
 // ── Router ────────────────────────────────────────────────────────────
 export default {
   async fetch(request, env) {
-    const url    = new URL(request.url);
-    const method = request.method;
+    try {
+      const url    = new URL(request.url);
+      const method = request.method;
 
-    // CORS preflight for /ocr
-    if (method === 'OPTIONS' && url.pathname === '/ocr') {
-      return new Response(null, {
-        headers: {
-          'Access-Control-Allow-Origin':  '*',
-          'Access-Control-Allow-Methods': 'POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        },
+      // CORS preflight for /ocr
+      if (method === 'OPTIONS' && url.pathname === '/ocr') {
+        return new Response(null, {
+          headers: {
+            'Access-Control-Allow-Origin':  '*',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          },
+        });
+      }
+
+      if (url.pathname === '/' && method === 'GET')         return servePage();
+      if (url.pathname === '/ocr' && method === 'POST')     return handleOcr(request, env);
+
+      return new Response('Not found', { status: 404, headers: SECURITY_HEADERS });
+    } catch (err) {
+      // Never let an unhandled crash return Cloudflare's HTML error page —
+      // always return JSON so the client can surface the real error message
+      return new Response(JSON.stringify({ ok: false, error: err.message }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json', ...SECURITY_HEADERS },
       });
     }
-
-    if (url.pathname === '/' && method === 'GET')  return servePage();
-    if (url.pathname === '/ocr' && method === 'POST') return handleOcr(request, env);
-
-    return new Response('Not found', { status: 404, headers: SECURITY_HEADERS });
   },
 };
