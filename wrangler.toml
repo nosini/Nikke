@@ -16,6 +16,13 @@ binding = "AI"
 pattern = "nikke.domain.com"
 zone_name = "domain.com"
 
+[observability]
+[observability.traces]
+enabled = true
+[observability.logs]
+enabled = true
+invocation_logs = true
+
 # Set these as secrets via:
 #   wrangler secret put OCR_USER
 #   wrangler secret put OCR_PASS
