@@ -45,7 +45,7 @@ function timingSafeEqual(a, b) {
   return crypto.subtle.timingSafeEqual(aBytes, bBytes);
 }
 
-// Returns 'admin' | 'union' | null — null means auth failed
+// Returns the matched username, or null if auth failed
 function authenticate(request, env) {
   try {
     const header = request.headers.get('Authorization') || '';
@@ -60,8 +60,7 @@ function authenticate(request, env) {
                  && timingSafeEqual(pass, env.OCR_PASS);
     const isUnion = timingSafeEqual(user, env.UNION_USER)
                  && timingSafeEqual(pass, env.UNION_PASS);
-    if (isAdmin) return 'admin';
-    if (isUnion) return 'union';
+    if (isAdmin || isUnion) return user;
     return null;
   } catch {
     return null; // malformed base64
@@ -76,7 +75,7 @@ function auditLog(ctx, env, fields) {
   ctx.waitUntil(
     env.DB.prepare(`
       INSERT INTO audit_logs
-        (timestamp, ip, country, cf_ray, user_agent, role, status_code, ai_ok, error_msg, image_bytes, duration_ms)
+        (timestamp, ip, country, cf_ray, user_agent, username, status_code, ai_ok, error_msg, image_bytes, duration_ms)
       VALUES
         (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
@@ -85,7 +84,7 @@ function auditLog(ctx, env, fields) {
       fields.country     ?? null,
       fields.cfRay       ?? null,
       fields.userAgent   ?? null,
-      fields.role        ?? null,   // 'admin' | 'union' | null (unauthenticated)
+      fields.username        ?? null,   // authenticated username, null = failed auth
       fields.statusCode  ?? null,
       fields.aiOk        ?? null,   // 1 = success, 0 = AI error, null = didn't reach AI
       fields.errorMsg    ?? null,
@@ -150,28 +149,28 @@ async function handleOcr(request, env, ctx) {
   const cfRay   = request.headers.get('cf-ray');
   const ua      = request.headers.get('user-agent');
 
-  const role = authenticate(request, env);
-  if (!role) {
-    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role: null, statusCode: 401, durationMs: Date.now() - t0 });
+  const username = authenticate(request, env);
+  if (!username) {
+    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username: null, statusCode: 401, durationMs: Date.now() - t0 });
     return unauthorized();
   }
 
   // Content-Length fast path (client-supplied, verified again below)
   const declaredLength = parseInt(request.headers.get('Content-Length') || '0', 10);
   if (declaredLength > MAX_BODY_BYTES) {
-    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role, statusCode: 413, durationMs: Date.now() - t0 });
+    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username, statusCode: 413, durationMs: Date.now() - t0 });
     return jsonResp({ error: 'Request body too large (max 5 MB)' }, 413);
   }
 
   let bodyBytes;
   try   { bodyBytes = await request.arrayBuffer(); }
   catch {
-    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role, statusCode: 400, errorMsg: 'body_read_failed', durationMs: Date.now() - t0 });
+    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username, statusCode: 400, errorMsg: 'body_read_failed', durationMs: Date.now() - t0 });
     return jsonResp({ error: 'Failed to read request body' }, 400);
   }
 
   if (bodyBytes.byteLength > MAX_BODY_BYTES) {
-    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role, statusCode: 413, durationMs: Date.now() - t0 });
+    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username, statusCode: 413, durationMs: Date.now() - t0 });
     return jsonResp({ error: 'Request body too large (max 5 MB)' }, 413);
   }
 
@@ -182,7 +181,7 @@ async function handleOcr(request, env, ctx) {
     let body;
     try   { body = JSON.parse(new TextDecoder().decode(bodyBytes)); }
     catch {
-      auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role, statusCode: 400, errorMsg: 'invalid_json', durationMs: Date.now() - t0 });
+      auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username, statusCode: 400, errorMsg: 'invalid_json', durationMs: Date.now() - t0 });
       return jsonResp({ error: 'Invalid JSON' }, 400);
     }
     imageBase64 = body.image;
@@ -192,7 +191,7 @@ async function handleOcr(request, env, ctx) {
     let form;
     try   { form = await clone.formData(); }
     catch {
-      auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role, statusCode: 400, errorMsg: 'invalid_multipart', durationMs: Date.now() - t0 });
+      auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username, statusCode: 400, errorMsg: 'invalid_multipart', durationMs: Date.now() - t0 });
       return jsonResp({ error: 'Invalid multipart form data' }, 400);
     }
     const file = form.get('image');
@@ -201,13 +200,13 @@ async function handleOcr(request, env, ctx) {
     imageBase64 = bytesToBase64(new Uint8Array(bytes));
     imageMime   = file.type || 'image/jpeg';
   } else {
-    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role, statusCode: 400, errorMsg: 'bad_content_type', durationMs: Date.now() - t0 });
+    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username, statusCode: 400, errorMsg: 'bad_content_type', durationMs: Date.now() - t0 });
     return jsonResp({ error: 'Expected application/json or multipart/form-data' }, 400);
   }
 
   const normalizedMime = (imageMime || '').toLowerCase().split(';')[0].trim();
   if (!ALLOWED_MIME.has(normalizedMime)) {
-    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role, statusCode: 415, errorMsg: `bad_mime:${normalizedMime}`, durationMs: Date.now() - t0 });
+    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username, statusCode: 415, errorMsg: `bad_mime:${normalizedMime}`, durationMs: Date.now() - t0 });
     return jsonResp({ error: `Unsupported image type: ${normalizedMime}` }, 415);
   }
 
@@ -216,12 +215,12 @@ async function handleOcr(request, env, ctx) {
   let imageBytes;
   try   { imageBytes = Uint8Array.from(atob(imageBase64), c => c.charCodeAt(0)); }
   catch {
-    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role, statusCode: 400, errorMsg: 'bad_base64', durationMs: Date.now() - t0 });
+    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username, statusCode: 400, errorMsg: 'bad_base64', durationMs: Date.now() - t0 });
     return jsonResp({ error: 'Invalid base64 image data' }, 400);
   }
 
   if (imageBytes.length > MAX_BODY_BYTES) {
-    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, role, statusCode: 413, imageBytes: imageBytes.length, durationMs: Date.now() - t0 });
+    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username, statusCode: 413, imageBytes: imageBytes.length, durationMs: Date.now() - t0 });
     return jsonResp({ error: 'Decoded image too large (max 5 MB)' }, 413);
   }
 
@@ -266,7 +265,7 @@ Rules:
     }
 
     auditLog(ctx, env, {
-      ip, country, cfRay, userAgent: ua, role,
+      ip, country, cfRay, userAgent: ua, username,
       statusCode: 200, aiOk: 1,
       imageBytes: imageBytes.length,
       durationMs: Date.now() - t0,
@@ -278,7 +277,7 @@ Rules:
     });
   } catch (err) {
     auditLog(ctx, env, {
-      ip, country, cfRay, userAgent: ua, role,
+      ip, country, cfRay, userAgent: ua, username,
       statusCode: 500, aiOk: 0,
       errorMsg: err.message.slice(0, 200),
       imageBytes: imageBytes.length,

@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   country      TEXT,                     -- 2-letter country code from Cloudflare
   cf_ray       TEXT,                     -- Cloudflare Ray ID — give this to CF support for any incident
   user_agent   TEXT,
-  role         TEXT,                     -- 'admin' | 'union' | null (unauthenticated attempt)
+  username     TEXT,                     -- authenticated username, NULL = failed auth
   status_code  INTEGER,                  -- HTTP status returned to client
   ai_ok        INTEGER,                  -- 1 = AI succeeded, 0 = AI errored, NULL = never reached AI
   error_msg    TEXT,                     -- error detail if something went wrong
@@ -18,5 +18,5 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 -- Index for the queries you'll actually run
 CREATE INDEX IF NOT EXISTS idx_timestamp ON audit_logs (timestamp);
-CREATE INDEX IF NOT EXISTS idx_role      ON audit_logs (role);
+CREATE INDEX IF NOT EXISTS idx_username  ON audit_logs (username);
 CREATE INDEX IF NOT EXISTS idx_ip        ON audit_logs (ip);
