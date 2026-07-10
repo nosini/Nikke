@@ -125,6 +125,8 @@
   .total-box-val{font-family:'Rajdhani',sans-serif;font-size:clamp(2rem,5vw,2.7rem);font-weight:800;color:#fff;text-shadow:0 0 26px rgba(255,77,125,.45),0 0 52px rgba(0,212,255,.15);}
   .total-box-full{font-family:'Share Tech Mono',monospace;font-size:.78rem;color:var(--muted);margin-top:.4rem;letter-spacing:.06em;}
 
+  .req-prio{display:none;align-items:center;gap:.45rem;font-family:'Share Tech Mono',monospace;font-size:.67rem;color:var(--muted);cursor:pointer;margin:-.3rem 0 .85rem;user-select:none;}
+  .req-prio input{accent-color:var(--accent);}
   .err-box{background:rgba(255,59,59,.07);border:1px solid rgba(255,59,59,.35);border-radius:6px;padding:.6rem .85rem;margin-top:.82rem;font-family:'Share Tech Mono',monospace;font-size:.7rem;color:var(--danger);display:none;}
   .err-box.on{display:block;}
   .empty-state{text-align:center;padding:2.4rem 1rem;color:var(--muted);font-family:'Share Tech Mono',monospace;font-size:.72rem;letter-spacing:.07em;}
@@ -277,6 +279,7 @@
         <option>Boss 4</option><option>Boss 5</option>
       </select>
     </div>
+    <label class="req-prio" id="req-prio-row"><input type="checkbox" id="inp-req-prio"> Prioritize strongest team for this boss (may lower total)</label>
     <div id="err-box" class="err-box"></div>
     <button class="btn btn-optimize" onclick="optimize()">⚡ FIND OPTIMAL LINEUP</button>
   </div>
@@ -680,7 +683,10 @@ function optimize(){
   const needBoss=reqBoss&&!locked.some(covers)?reqBoss:null;
   if(needBoss&&locked.length===RUNS){errEl.textContent=`All ${RUNS} runs are locked but none targets ${reqBoss}. Unlock one or drop the requirement.`;return errEl.classList.add('on');}
   const lockedChars=new Set(locked.flatMap(t=>t.chars.map(c=>c.name.toLowerCase())));
-  const best=findBestCombo(free,RUNS-locked.length,lockedChars,needBoss);
+  const prio=needBoss&&document.getElementById('inp-req-prio').checked;
+  const best=prio
+    ?findPrioCombo(free,RUNS-locked.length,lockedChars,needBoss)
+    :findBestCombo(free,RUNS-locked.length,lockedChars,needBoss);
   if(!best){errEl.textContent=needBoss?`No conflict-free lineup includes a ${reqBoss} team. Add more ${reqBoss} teams or adjust locked teams.`:'No conflict-free combination found. Add more teams or adjust locked teams.';return errEl.classList.add('on');}
   renderResults([...locked,...best]);
 }
@@ -697,6 +703,19 @@ function findBestCombo(pool,k,excl,needBoss){
   });return best;
 }
 function combos(arr,k){const r=[];function go(s,cur){if(cur.length===k){r.push([...cur]);return;}for(let i=s;i<arr.length;i++){cur.push(arr[i]);go(i+1,cur);cur.pop();}}go(0,[]);return r;}
+// Prioritize mode: force the strongest usable covering team into the lineup
+// first (exact boss beats "— Any" on ties), then maximize the rest around it.
+function findPrioCombo(pool,k,excl,needBoss){
+  const cands=pool.filter(t=>t.boss===needBoss||t.boss==='—')
+    .sort((a,b)=>(b.score-a.score)||((b.boss===needBoss)-(a.boss===needBoss)));
+  for(const cand of cands){
+    const cChars=cand.chars.map(c=>c.name.toLowerCase());
+    if(cChars.some(c=>excl.has(c)))continue;
+    const rest=findBestCombo(pool.filter(t=>t!==cand),k-1,new Set([...excl,...cChars]));
+    if(rest)return[cand,...rest];
+  }
+  return null;
+}
 
 /* ══════════════════════════════════════════
    RESULTS
@@ -979,6 +998,10 @@ function applyOcrToForm(){
   toast(`Applied ${Math.min(units.length,NUM_SLOTS)} units to form`);
   document.querySelector('.grid-2').scrollIntoView({behavior:'smooth',block:'start'});
 }
+
+document.getElementById('inp-req-boss').addEventListener('change',e=>{
+  document.getElementById('req-prio-row').style.display=e.target.value?'flex':'none';
+});
 
 /* ══ INIT ══ */
 loadStorage();loadCreds();buildSlots();renderTeams();
