@@ -313,14 +313,11 @@ function parseScore(raw) {
   // shorthand suffixes first (must come before dot-strip)
   const sfxMatch = lc.match(/^([\d.,]+)\s*([bBmMkK])$/);
   if (sfxMatch) {
-    const num = sfxMatch[1].replace(/[.,]/g, match => {
-      // if there are multiple separators, they're thousand-seps → remove
-      // if there's a single dot/comma it could be decimal — handle below
-      return '';
-    });
-    // re-parse cleanly
-    const base = parseFloat(sfxMatch[1].replace(/[^0-9.]/g, '')) ||
-                 parseFloat(sfxMatch[1].replace(/[^0-9,]/g, '').replace(',','.')) || 0;
+    const sepCount = (sfxMatch[1].match(/[.,]/g) || []).length;
+    // one separator → decimal point; multiple → thousand-seps, strip them all
+    const base = sepCount === 1
+      ? parseFloat(sfxMatch[1].replace(',', '.')) || 0
+      : parseFloat(sfxMatch[1].replace(/[.,]/g, '')) || 0;
     const sfx = sfxMatch[2].toLowerCase();
     if (sfx === 'b') return base * 1e9;
     if (sfx === 'm') return base * 1e6;
@@ -609,6 +606,8 @@ function addTeam(){
   const overrideRaw=document.getElementById('inp-override').value.trim();
   const chars=slotState.filter(s=>s.charName).map(s=>({name:s.charName,damage:s.damage}));
   if(!chars.length){toast('Select at least 1 character');return;}
+  const lowerNames=chars.map(c=>c.name.toLowerCase());
+  if(new Set(lowerNames).size!==lowerNames.length){toast('Duplicate character — each unit in a team must be unique');return;}
   const calcTotal=slotState.reduce((s,sl)=>s+(sl.damage||0),0);
   const score=overrideRaw?parseScore(overrideRaw):calcTotal;
   if(score<=0){toast('Score is 0 — enter per-unit damage or an override score');return;}
@@ -745,6 +744,10 @@ function getBasicAuth(){
     const d=JSON.parse(localStorage.getItem(CF_CREDS_KEY)||'null');
     if(d?.user&&d?.pass) return 'Basic '+btoa(d.user+':'+d.pass);
   }catch(e){}
+  // fall back to typed-but-unsaved field values
+  const u=document.getElementById('ocr-user')?.value.trim();
+  const p=document.getElementById('ocr-pass')?.value;
+  if(u&&p) return 'Basic '+btoa(u+':'+p);
   return null;
 }
 
@@ -891,43 +894,13 @@ function parseAndShowOcrResults(rawText){
   const totalRow=items.find(r=>r.name==='__total__');
 
   // Build ocrSlotState from matched names
-  ocrSlotState = unitRows.slice(0,5).map(r=>({
+  ocrSlotState = unitRows.slice(0,NUM_SLOTS).map(r=>({
     charName: bestCharMatch(r.name),
     damage: r.damage||''
   }));
 
   // Render rows with dropdowns
-  const rowsEl=document.getElementById('ocr-rows');
-  rowsEl.innerHTML='';
-  ocrSlotState.forEach((s,i)=>{
-    const row=document.createElement('div');row.className='ocr-row';
-    // dropdown trigger
-    const trig=document.createElement('div');
-    trig.className='cs-trigger';trig.id='ocr-trig-'+i;
-    trig.innerHTML=s.charName
-      ?`<span class="cs-trigger-label">${esc(s.charName)}</span><span class="cs-trigger-arrow">▼</span>`
-      :`<span class="cs-trigger-label ph">Select unit…</span><span class="cs-trigger-arrow">▼</span>`;
-    trig.addEventListener('click',e=>{e.stopPropagation();openDropdown('ocr-'+i);});
-    // damage input
-    const dmgWrap=document.createElement('div');dmgWrap.className='dmg-wrap';
-    const dmgInp=document.createElement('input');
-    dmgInp.type='text';dmgInp.className='ocr-row-dmg';dmgInp.id='ocr-d-'+i;
-    dmgInp.value=s.damage;dmgInp.placeholder='Damage';
-    dmgInp.addEventListener('input',()=>{ ocrSlotState[i].damage=dmgInp.value; });
-    dmgWrap.appendChild(dmgInp);
-    // delete button
-    const del=document.createElement('button');
-    del.className='ocr-row-del';del.textContent='✕';
-    del.addEventListener('click',()=>{
-      ocrSlotState.splice(i,1);
-      // re-render remaining
-      const currentDmgValues=Array.from(document.querySelectorAll('.ocr-row-dmg')).map(el=>el.value);
-      ocrSlotState.forEach((s2,j)=>{s2.damage=currentDmgValues[j]||s2.damage;});
-      parseAndShowOcrResultsFromState();
-    });
-    row.appendChild(trig);row.appendChild(dmgWrap);row.appendChild(del);
-    rowsEl.appendChild(row);
-  });
+  renderOcrRows();
 
   // total row
   const totEl=document.getElementById('ocr-total-row');
@@ -940,8 +913,9 @@ function parseAndShowOcrResults(rawText){
   btn.disabled=false;
 }
 
-// Re-render rows from current ocrSlotState (used after deletion)
-function parseAndShowOcrResultsFromState(){
+// Render all OCR rows from ocrSlotState (initial render and after deletion).
+// Re-renders after every delete so row listeners always capture fresh indices.
+function renderOcrRows(){
   const rowsEl=document.getElementById('ocr-rows');
   rowsEl.innerHTML='';
   ocrSlotState.forEach((s,i)=>{
@@ -962,7 +936,7 @@ function parseAndShowOcrResultsFromState(){
     del.className='ocr-row-del';del.textContent='✕';
     del.addEventListener('click',()=>{
       ocrSlotState.splice(i,1);
-      parseAndShowOcrResultsFromState();
+      renderOcrRows();
     });
     row.appendChild(trig);row.appendChild(dmgWrap);row.appendChild(del);
     rowsEl.appendChild(row);

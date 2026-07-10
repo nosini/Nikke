@@ -55,11 +55,14 @@ function authenticate(request, env) {
     if (colon === -1) return null;
     const user = decoded.slice(0, colon);
     const pass = decoded.slice(colon + 1);
-    // Always run both comparisons — short-circuiting would leak timing info
-    const isAdmin = timingSafeEqual(user, env.OCR_USER)
-                 && timingSafeEqual(pass, env.OCR_PASS);
-    const isUnion = timingSafeEqual(user, env.UNION_USER)
-                 && timingSafeEqual(pass, env.UNION_PASS);
+    // Compute all four comparisons up front — combining with && would
+    // short-circuit and leak username validity via timing
+    const adminUserOk = timingSafeEqual(user, env.OCR_USER);
+    const adminPassOk = timingSafeEqual(pass, env.OCR_PASS);
+    const unionUserOk = timingSafeEqual(user, env.UNION_USER);
+    const unionPassOk = timingSafeEqual(pass, env.UNION_PASS);
+    const isAdmin = adminUserOk && adminPassOk;
+    const isUnion = unionUserOk && unionPassOk;
     if (isAdmin || isUnion) return user;
     return null;
   } catch {
@@ -113,18 +116,6 @@ function unauthorized() {
   });
 }
 
-// Safe base64 encode — avoids spread-operator stack overflow on large images.
-// String.fromCharCode(...hugeArray) exceeds JS engine max argument count for
-// images over ~500 KB. This chunks instead.
-function bytesToBase64(bytes) {
-  let binary = '';
-  const chunk = 8192;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
-}
-
 // ── Page handler ──────────────────────────────────────────────────────
 function servePage() {
   // Inject the character list from characters.js so the page never goes stale.
@@ -174,7 +165,7 @@ async function handleOcr(request, env, ctx) {
     return jsonResp({ error: 'Request body too large (max 5 MB)' }, 413);
   }
 
-  let imageBase64, imageMime;
+  let imageBase64, imageBytes, imageMime;
   const contentType = request.headers.get('Content-Type') || '';
 
   if (contentType.includes('application/json')) {
@@ -195,10 +186,12 @@ async function handleOcr(request, env, ctx) {
       return jsonResp({ error: 'Invalid multipart form data' }, 400);
     }
     const file = form.get('image');
-    if (!file) return jsonResp({ error: 'No image field in form data' }, 400);
-    const bytes = await file.arrayBuffer();
-    imageBase64 = bytesToBase64(new Uint8Array(bytes));
-    imageMime   = file.type || 'image/jpeg';
+    if (!file || typeof file.arrayBuffer !== 'function') {
+      auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username, statusCode: 400, errorMsg: 'no_image_field', durationMs: Date.now() - t0 });
+      return jsonResp({ error: 'No image field in form data' }, 400);
+    }
+    imageBytes = new Uint8Array(await file.arrayBuffer());
+    imageMime  = file.type || 'image/jpeg';
   } else {
     auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username, statusCode: 400, errorMsg: 'bad_content_type', durationMs: Date.now() - t0 });
     return jsonResp({ error: 'Expected application/json or multipart/form-data' }, 400);
@@ -210,13 +203,17 @@ async function handleOcr(request, env, ctx) {
     return jsonResp({ error: `Unsupported image type: ${normalizedMime}` }, 415);
   }
 
-  if (!imageBase64) return jsonResp({ error: 'No image data' }, 400);
-
-  let imageBytes;
-  try   { imageBytes = Uint8Array.from(atob(imageBase64), c => c.charCodeAt(0)); }
-  catch {
-    auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username, statusCode: 400, errorMsg: 'bad_base64', durationMs: Date.now() - t0 });
-    return jsonResp({ error: 'Invalid base64 image data' }, 400);
+  // JSON path delivers base64 — decode it here. Multipart already has bytes.
+  if (imageBytes === undefined) {
+    if (!imageBase64) {
+      auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username, statusCode: 400, errorMsg: 'no_image_data', durationMs: Date.now() - t0 });
+      return jsonResp({ error: 'No image data' }, 400);
+    }
+    try   { imageBytes = Uint8Array.from(atob(imageBase64), c => c.charCodeAt(0)); }
+    catch {
+      auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username, statusCode: 400, errorMsg: 'bad_base64', durationMs: Date.now() - t0 });
+      return jsonResp({ error: 'Invalid base64 image data' }, 400);
+    }
   }
 
   if (imageBytes.length > MAX_BODY_BYTES) {
@@ -279,11 +276,11 @@ Rules:
     auditLog(ctx, env, {
       ip, country, cfRay, userAgent: ua, username,
       statusCode: 500, aiOk: 0,
-      errorMsg: err.message.slice(0, 200),
+      errorMsg: String(err?.message ?? err).slice(0, 200),
       imageBytes: imageBytes.length,
       durationMs: Date.now() - t0,
     });
-    return jsonResp({ ok: false, error: err.message }, 500);
+    return jsonResp({ ok: false, error: String(err?.message ?? err) }, 500);
   }
 }
 
@@ -293,17 +290,6 @@ export default {
     try {
       const url    = new URL(request.url);
       const method = request.method;
-
-      // CORS preflight for /ocr
-      if (method === 'OPTIONS' && url.pathname === '/ocr') {
-        return new Response(null, {
-          headers: {
-            'Access-Control-Allow-Origin':  '*',
-            'Access-Control-Allow-Methods': 'POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-          },
-        });
-      }
 
       if (url.pathname === '/' && method === 'GET')     return servePage();
       if (url.pathname === '/ocr' && method === 'POST') return handleOcr(request, env, ctx);

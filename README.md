@@ -55,11 +55,11 @@ wrangler deploy
 ```bash
 # All requests in the last 24 hours
 npx wrangler d1 execute ocr-logs --remote --command \
-  "SELECT timestamp, ip, country, role, status_code, ai_ok, duration_ms FROM audit_logs ORDER BY timestamp DESC LIMIT 50"
+  "SELECT timestamp, ip, country, username, status_code, ai_ok, duration_ms FROM audit_logs ORDER BY timestamp DESC LIMIT 50"
 
 # All failed auth attempts
 npx wrangler d1 execute ocr-logs --remote --command \
-  "SELECT timestamp, ip, country FROM audit_logs WHERE role IS NULL ORDER BY timestamp DESC"
+  "SELECT timestamp, ip, country FROM audit_logs WHERE username IS NULL ORDER BY timestamp DESC"
 
 # Requests by a specific IP
 npx wrangler d1 execute ocr-logs --remote --command \
