@@ -269,6 +269,14 @@
   <div class="panel" style="max-width:440px;margin:0 auto;">
     <div class="panel-title">⚡ Optimize · 3 Runs</div>
     <p style="font-family:'Share Tech Mono',monospace;font-size:.7rem;color:var(--muted);margin-bottom:.5rem;">Lock teams you've already used, then click below.</p>
+    <div class="form-row">
+      <label class="form-label">Required Boss (must be one of the 3 runs)</label>
+      <select id="inp-req-boss">
+        <option value="">— No requirement</option>
+        <option>Boss 1</option><option>Boss 2</option><option>Boss 3</option>
+        <option>Boss 4</option><option>Boss 5</option>
+      </select>
+    </div>
     <div id="err-box" class="err-box"></div>
     <button class="btn btn-optimize" onclick="optimize()">⚡ FIND OPTIMAL LINEUP</button>
   </div>
@@ -662,20 +670,26 @@ function renderTeams(){
 function optimize(){
   const errEl=document.getElementById('err-box');errEl.classList.remove('on');
   if(teams.length<RUNS){errEl.textContent=`Need at least ${RUNS} teams. You have ${teams.length}.`;return errEl.classList.add('on');}
+  const reqBoss=document.getElementById('inp-req-boss').value;
+  const covers=t=>t.boss===reqBoss||t.boss==='—'; // "— Any" teams can hit any boss
   const locked=teams.filter(t=>t.locked);const free=teams.filter(t=>!t.locked);
   if(locked.length>RUNS){errEl.textContent=`Too many locked teams (${locked.length}) for ${RUNS} runs.`;return errEl.classList.add('on');}
   const lcC=findConflicts(locked);
   if(lcC.length){errEl.textContent=`Locked teams share: ${lcC.join(', ')}`;return errEl.classList.add('on');}
+  if(reqBoss&&!teams.some(covers)){errEl.textContent=`No team targets ${reqBoss}. Add one first.`;return errEl.classList.add('on');}
+  const needBoss=reqBoss&&!locked.some(covers)?reqBoss:null;
+  if(needBoss&&locked.length===RUNS){errEl.textContent=`All ${RUNS} runs are locked but none targets ${reqBoss}. Unlock one or drop the requirement.`;return errEl.classList.add('on');}
   const lockedChars=new Set(locked.flatMap(t=>t.chars.map(c=>c.name.toLowerCase())));
-  const best=findBestCombo(free,RUNS-locked.length,lockedChars);
-  if(!best){errEl.textContent='No conflict-free combination found. Add more teams or adjust locked teams.';return errEl.classList.add('on');}
+  const best=findBestCombo(free,RUNS-locked.length,lockedChars,needBoss);
+  if(!best){errEl.textContent=needBoss?`No conflict-free lineup includes a ${reqBoss} team. Add more ${reqBoss} teams or adjust locked teams.`:'No conflict-free combination found. Add more teams or adjust locked teams.';return errEl.classList.add('on');}
   renderResults([...locked,...best]);
 }
 
 function findConflicts(ts){const seen=new Set(),out=new Set();ts.forEach(t=>t.chars.forEach(c=>{const k=c.name.toLowerCase();if(seen.has(k))out.add(c.name);seen.add(k);}));return[...out];}
-function findBestCombo(pool,k,excl){
+function findBestCombo(pool,k,excl,needBoss){
   if(k===0)return[];let best=null,bs=-1;
   combos(pool,k).forEach(combo=>{
+    if(needBoss&&!combo.some(t=>t.boss===needBoss||t.boss==='—'))return;
     const chars=combo.flatMap(t=>t.chars.map(c=>c.name.toLowerCase()));
     const cs=new Set(chars);if(cs.size<chars.length)return;
     for(const c of cs)if(excl.has(c))return;
