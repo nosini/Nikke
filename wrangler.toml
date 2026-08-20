@@ -25,12 +25,20 @@ pattern = "nikke.driftmail.eu/*"
 zone_name = "driftmail.eu"
 
 [observability]
+enabled = true
+head_sampling_rate = 1
+
 [observability.logs]
 enabled = true
+head_sampling_rate = 1
+persist = true
 invocation_logs = true
 
 [observability.traces]
 enabled = true
+persist = true
+head_sampling_rate = 1
+
 
 # Set these as secrets via:
 #   wrangler secret put OCR_USER   ← your personal admin account
