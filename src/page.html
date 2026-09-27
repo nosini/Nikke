@@ -451,7 +451,22 @@ function openDropdown(key){
   openSlotKey=key;
   const floating=document.getElementById('cs-floating');
   const trigger=document.getElementById(slotTrigId(key));
+  positionDropdown();
+  floating.classList.add('open');
+  trigger.classList.add('open');
+  const si=document.getElementById('cs-search-inp');
+  si.value='';clearArrowIdx();buildOptions('');
+  setTimeout(()=>si.focus(),40);
+}
+
+// Anchor the floating list to its trigger. Returns false if the trigger is gone
+// or scrolled out of view.
+function positionDropdown(){
+  const floating=document.getElementById('cs-floating');
+  const trigger=document.getElementById(slotTrigId(openSlotKey));
+  if(!trigger)return false;
   const rect=trigger.getBoundingClientRect();
+  if(rect.bottom<0||rect.top>window.innerHeight)return false;
   floating.style.width=Math.max(230,rect.width)+'px';
   floating.style.left=Math.min(rect.left,window.innerWidth-240)+'px';
   const spaceBelow=window.innerHeight-rect.bottom;
@@ -460,11 +475,7 @@ function openDropdown(key){
   }else{
     floating.style.bottom=(window.innerHeight-rect.top+4)+'px';floating.style.top='auto';
   }
-  floating.classList.add('open');
-  trigger.classList.add('open');
-  const si=document.getElementById('cs-search-inp');
-  si.value='';clearArrowIdx();buildOptions('');
-  setTimeout(()=>si.focus(),40);
+  return true;
 }
 
 function closeDropdown(){
@@ -477,11 +488,16 @@ document.addEventListener('click',e=>{
   if(!e.target.closest('#cs-floating')&&!e.target.closest('.cs-trigger'))closeDropdown();
 });
 
+// Follow the trigger on scroll/resize instead of closing: on phones, focusing
+// the search box opens the keyboard, which resizes and scrolls the viewport.
+function repositionDropdown(){
+  if(openSlotKey!==null&&!positionDropdown())closeDropdown();
+}
 window.addEventListener('scroll',e=>{
-  if(!e.target.closest || !e.target.closest('#cs-floating'))closeDropdown();
+  if(!e.target.closest || !e.target.closest('#cs-floating'))repositionDropdown();
 },true);
 
-window.addEventListener('resize',closeDropdown);
+window.addEventListener('resize',repositionDropdown);
 
 // Arrow key navigation state
 let arrowIdx = -1;
@@ -623,8 +639,10 @@ function addTeam(){
   const score=overrideRaw?parseScore(overrideRaw):calcTotal;
   if(score<=0){toast('Score is 0 — enter per-unit damage or an override score');return;}
   // Auto-name: count existing teams for this boss
-  const bossTeams=teams.filter(t=>t.boss===boss).length;
-  const name=boss+' Team '+(bossTeams+1);
+  // (skip numbers still in use, so deleting a team can't cause a duplicate name)
+  let n=teams.filter(t=>t.boss===boss).length+1;
+  while(teams.some(t=>t.name===boss+' Team '+n))n++;
+  const name=boss+' Team '+n;
   teams.push({id:nextId++,name,boss,score,chars,locked:false});
   saveStorage();
   document.getElementById('inp-override').value='';
@@ -674,7 +692,7 @@ function optimize(){
   const errEl=document.getElementById('err-box');errEl.classList.remove('on');
   if(teams.length<RUNS){errEl.textContent=`Need at least ${RUNS} teams. You have ${teams.length}.`;return errEl.classList.add('on');}
   const reqBoss=document.getElementById('inp-req-boss').value;
-  const covers=t=>t.boss===reqBoss||t.boss==='—'; // "— Any" teams can hit any boss
+  const covers=t=>coversBoss(t,reqBoss);
   const locked=teams.filter(t=>t.locked);const free=teams.filter(t=>!t.locked);
   if(locked.length>RUNS){errEl.textContent=`Too many locked teams (${locked.length}) for ${RUNS} runs.`;return errEl.classList.add('on');}
   const lcC=findConflicts(locked);
@@ -683,19 +701,24 @@ function optimize(){
   const needBoss=reqBoss&&!locked.some(covers)?reqBoss:null;
   if(needBoss&&locked.length===RUNS){errEl.textContent=`All ${RUNS} runs are locked but none targets ${reqBoss}. Unlock one or drop the requirement.`;return errEl.classList.add('on');}
   const lockedChars=new Set(locked.flatMap(t=>t.chars.map(c=>c.name.toLowerCase())));
-  const prio=needBoss&&document.getElementById('inp-req-prio').checked;
+  const prioChecked=reqBoss&&document.getElementById('inp-req-prio').checked;
+  const prio=needBoss&&prioChecked;
   const best=prio
     ?findPrioCombo(free,RUNS-locked.length,lockedChars,needBoss)
     :findBestCombo(free,RUNS-locked.length,lockedChars,needBoss);
   if(!best){errEl.textContent=needBoss?`No conflict-free lineup includes a ${reqBoss} team. Add more ${reqBoss} teams or adjust locked teams.`:'No conflict-free combination found. Add more teams or adjust locked teams.';return errEl.classList.add('on');}
-  renderResults([...locked,...best]);
+  renderResults([...locked,...best],reqBoss);
+  if(prioChecked&&!needBoss)toast(`Locked team already covers ${reqBoss} — prioritize not applied`);
 }
+
+// "— Any" teams can hit any boss
+function coversBoss(t,boss){return t.boss===boss||t.boss==='—';}
 
 function findConflicts(ts){const seen=new Set(),out=new Set();ts.forEach(t=>t.chars.forEach(c=>{const k=c.name.toLowerCase();if(seen.has(k))out.add(c.name);seen.add(k);}));return[...out];}
 function findBestCombo(pool,k,excl,needBoss){
   if(k===0)return[];let best=null,bs=-1;
   combos(pool,k).forEach(combo=>{
-    if(needBoss&&!combo.some(t=>t.boss===needBoss||t.boss==='—'))return;
+    if(needBoss&&!combo.some(t=>coversBoss(t,needBoss)))return;
     const chars=combo.flatMap(t=>t.chars.map(c=>c.name.toLowerCase()));
     const cs=new Set(chars);if(cs.size<chars.length)return;
     for(const c of cs)if(excl.has(c))return;
@@ -706,7 +729,7 @@ function combos(arr,k){const r=[];function go(s,cur){if(cur.length===k){r.push([
 // Prioritize mode: force the strongest usable covering team into the lineup
 // first (exact boss beats "— Any" on ties), then maximize the rest around it.
 function findPrioCombo(pool,k,excl,needBoss){
-  const cands=pool.filter(t=>t.boss===needBoss||t.boss==='—')
+  const cands=pool.filter(t=>coversBoss(t,needBoss))
     .sort((a,b)=>(b.score-a.score)||((b.boss===needBoss)-(a.boss===needBoss)));
   for(const cand of cands){
     const cChars=cand.chars.map(c=>c.name.toLowerCase());
@@ -720,8 +743,10 @@ function findPrioCombo(pool,k,excl,needBoss){
 /* ══════════════════════════════════════════
    RESULTS
 ══════════════════════════════════════════ */
-function renderResults(final){
+function renderResults(final,reqBoss){
   const total=final.reduce((s,t)=>s+t.score,0);
+  // Mark the run that satisfies the required boss (exact boss over "— Any")
+  const reqRun=reqBoss?(final.find(t=>t.boss===reqBoss)||final.find(t=>coversBoss(t,reqBoss))):null;
   document.getElementById('res-grid').innerHTML=final.map((t,i)=>{
     const ch=t.chars.map(c=>{
       const dmg=c.damage?`<span class="rd">${fmtScore(c.damage)}</span>`:'';
@@ -730,6 +755,7 @@ function renderResults(final){
     return`<div class="res-card">
       <div class="res-rank">RUN ${i+1}</div>
       ${t.locked?'<div class="res-locked">🔒 LOCKED</div>':''}
+      ${t===reqRun?`<div class="res-locked">★ USE ON ${esc(reqBoss.toUpperCase())}</div>`:''}
       <div class="res-name">${esc(t.name)}</div>
       <div class="res-boss">${esc(t.boss)}</div>
       <div class="res-score">${fmtScore(t.score)}</div>
@@ -772,15 +798,21 @@ function saveCreds(){
   document.getElementById('creds-arrow').textContent='▶';
 }
 
+// btoa only accepts Latin-1 — encode as UTF-8 first (the worker decodes UTF-8)
+function basicAuth(user,pass){
+  const bytes=new TextEncoder().encode(user+':'+pass);
+  return 'Basic '+btoa(Array.from(bytes,b=>String.fromCharCode(b)).join(''));
+}
+
 function getBasicAuth(){
   try{
     const d=JSON.parse(localStorage.getItem(CF_CREDS_KEY)||'null');
-    if(d?.user&&d?.pass) return 'Basic '+btoa(d.user+':'+d.pass);
+    if(d?.user&&d?.pass) return basicAuth(d.user,d.pass);
   }catch(e){}
   // fall back to typed-but-unsaved field values
   const u=document.getElementById('ocr-user')?.value.trim();
   const p=document.getElementById('ocr-pass')?.value;
-  if(u&&p) return 'Basic '+btoa(u+':'+p);
+  if(u&&p) return basicAuth(u,p);
   return null;
 }
 
@@ -798,6 +830,7 @@ function setOcrStatus(msg,cls=''){
 
 function handleOcrFile(file){
   if(!file)return;
+  if(file.size>5*1024*1024){toast('Image too large (max 5 MB) — crop or compress it first');return;}
   ocrImageMime=file.type||'image/jpeg';
   const reader=new FileReader();
   reader.onload=e=>{
@@ -877,31 +910,33 @@ async function runOcr(){
 }
 
 function bestCharMatch(raw){
-  if(!raw) return null;
+  if(typeof raw!=='string'||!raw.trim()) return null;
   const r=raw.toLowerCase().trim();
   // exact
   let m=CHARACTERS.find(c=>c.toLowerCase()===r);
   if(m) return m;
   // OCR often sees only the suffix after ": " — try matching the part after colon
   // e.g. "Agent Bunny" → "Ade: Agent Bunny"
-  m=CHARACTERS.find(c=>c.toLowerCase().includes(': '+r));
+  m=CHARACTERS.find(c=>c.toLowerCase().endsWith(': '+r));
   if(m) return m;
-  // raw contains the character name
-  m=CHARACTERS.find(c=>c.toLowerCase().includes(r));
-  if(m) return m;
-  // character name is contained in raw
-  m=CHARACTERS.find(c=>r.includes(c.toLowerCase()));
-  if(m) return m;
-  // word-level overlap: find character whose words are mostly present in raw
-  const rawWords=r.split(/\s+/);
+  // truncated name: character name contains raw (too short raws match anything)
+  if(r.length>=3){
+    m=CHARACTERS.find(c=>c.toLowerCase().includes(r));
+    if(m) return m;
+  }
+  // word-level overlap: most of the character's words are in raw, and most of
+  // raw's words are in the character — so "Soda: X Bunny" beats plain "Soda"
+  const words=s=>s.split(/[\s:]+/).filter(Boolean);
+  const wordHit=(a,b)=>a===b||(a.length>2&&b.length>2&&(a.includes(b)||b.includes(a)));
+  const rawWords=words(r);
   let best=null, bestScore=0;
   CHARACTERS.forEach(c=>{
-    const cWords=c.toLowerCase().split(/[\s:]+/);
-    const hits=cWords.filter(w=>w.length>2&&rawWords.some(rw=>rw.includes(w)||w.includes(rw))).length;
-    const score=hits/cWords.length;
-    if(score>0.5&&score>bestScore){bestScore=score;best=c;}
+    const cWords=words(c.toLowerCase());
+    const cFrac=cWords.filter(w=>rawWords.some(rw=>wordHit(w,rw))).length/cWords.length;
+    const rFrac=rawWords.filter(rw=>cWords.some(w=>wordHit(w,rw))).length/rawWords.length;
+    if(cFrac>0.5&&cFrac*rFrac>bestScore){bestScore=cFrac*rFrac;best=c;}
   });
-  return best||raw; // fall back to raw if nothing found
+  return best||raw.trim(); // fall back to raw if nothing found
 }
 
 function parseAndShowOcrResults(rawText){
@@ -923,13 +958,13 @@ function parseAndShowOcrResults(rawText){
     btn.disabled=false;return;
   }
 
-  const unitRows=items.filter(r=>r.name!=='__total__');
-  const totalRow=items.find(r=>r.name==='__total__');
+  // The model's output is untrusted — keep only {name:string} rows
+  const unitRows=items.filter(r=>r&&typeof r==='object'&&typeof r.name==='string'&&r.name!=='__total__');
 
   // Build ocrSlotState from matched names
   ocrSlotState = unitRows.slice(0,NUM_SLOTS).map(r=>({
     charName: bestCharMatch(r.name),
-    damage: r.damage||''
+    damage: r.damage==null?'':String(r.damage)
   }));
 
   // Render rows with dropdowns
@@ -999,12 +1034,15 @@ function applyOcrToForm(){
   document.querySelector('.grid-2').scrollIntoView({behavior:'smooth',block:'start'});
 }
 
-document.getElementById('inp-req-boss').addEventListener('change',e=>{
-  document.getElementById('req-prio-row').style.display=e.target.value?'flex':'none';
-});
+// Also run at init: the browser may restore the select/checkbox on reload
+// without firing 'change'
+function syncReqPrioRow(){
+  document.getElementById('req-prio-row').style.display=document.getElementById('inp-req-boss').value?'flex':'none';
+}
+document.getElementById('inp-req-boss').addEventListener('change',syncReqPrioRow);
 
 /* ══ INIT ══ */
-loadStorage();loadCreds();buildSlots();renderTeams();
+loadStorage();loadCreds();buildSlots();renderTeams();syncReqPrioRow();
 </script>
 </body>
 </html>

@@ -19,7 +19,10 @@ import { CHARACTERS } from './characters.js';
 import PAGE_HTML      from './page.html';
 
 // ── Config ────────────────────────────────────────────────────────────
-const MAX_BODY_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
+// The JSON path carries the image as base64 (4/3 the size), plus a little
+// room for the JSON wrapper / multipart boundaries
+const MAX_BODY_BYTES = Math.ceil(MAX_IMAGE_BYTES * 4 / 3) + 64 * 1024;
 
 const ALLOWED_MIME = new Set([
   'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif',
@@ -50,7 +53,8 @@ function authenticate(request, env) {
   try {
     const header = request.headers.get('Authorization') || '';
     if (!header.startsWith('Basic ')) return null;
-    const decoded = atob(header.slice(6));
+    // The client sends UTF-8 bytes (btoa can't take non-Latin-1 text)
+    const decoded = new TextDecoder().decode(Uint8Array.from(atob(header.slice(6)), c => c.charCodeAt(0)));
     const colon   = decoded.indexOf(':');
     if (colon === -1) return null;
     const user = decoded.slice(0, colon);
@@ -117,13 +121,16 @@ function unauthorized() {
 }
 
 // ── Page handler ──────────────────────────────────────────────────────
+// Inject the character list from characters.js so the page never goes stale.
+// Built once per isolate. `<` is escaped so a name can't close the <script>,
+// and the replacer is a function so `$&`/`$'` in names aren't treated as patterns.
+const PAGE_WITH_CHARACTERS = PAGE_HTML.replace(
+  '/* __CHARACTERS_PLACEHOLDER__ */',
+  () => `const CHARACTERS = ${JSON.stringify(CHARACTERS).replace(/</g, '\\u003c')};`,
+);
+
 function servePage() {
-  // Inject the character list from characters.js so the page never goes stale.
-  const injected = PAGE_HTML.replace(
-    '/* __CHARACTERS_PLACEHOLDER__ */',
-    `const CHARACTERS = ${JSON.stringify(CHARACTERS)};`,
-  );
-  return new Response(injected, {
+  return new Response(PAGE_WITH_CHARACTERS, {
     headers: {
       'Content-Type': 'text/html;charset=UTF-8',
       'Cache-Control': 'no-store',
@@ -150,7 +157,7 @@ async function handleOcr(request, env, ctx) {
   const declaredLength = parseInt(request.headers.get('Content-Length') || '0', 10);
   if (declaredLength > MAX_BODY_BYTES) {
     auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username, statusCode: 413, durationMs: Date.now() - t0 });
-    return jsonResp({ error: 'Request body too large (max 5 MB)' }, 413);
+    return jsonResp({ error: 'Request body too large' }, 413);
   }
 
   let bodyBytes;
@@ -162,7 +169,7 @@ async function handleOcr(request, env, ctx) {
 
   if (bodyBytes.byteLength > MAX_BODY_BYTES) {
     auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username, statusCode: 413, durationMs: Date.now() - t0 });
-    return jsonResp({ error: 'Request body too large (max 5 MB)' }, 413);
+    return jsonResp({ error: 'Request body too large' }, 413);
   }
 
   let imageBase64, imageBytes, imageMime;
@@ -174,6 +181,12 @@ async function handleOcr(request, env, ctx) {
     catch {
       auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username, statusCode: 400, errorMsg: 'invalid_json', durationMs: Date.now() - t0 });
       return jsonResp({ error: 'Invalid JSON' }, 400);
+    }
+    if (!body || typeof body !== 'object'
+        || (body.image != null && typeof body.image !== 'string')
+        || (body.mime != null && typeof body.mime !== 'string')) {
+      auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username, statusCode: 400, errorMsg: 'bad_json_shape', durationMs: Date.now() - t0 });
+      return jsonResp({ error: 'Expected {"image": base64 string, "mime": string}' }, 400);
     }
     imageBase64 = body.image;
     imageMime   = body.mime || 'image/jpeg';
@@ -216,7 +229,7 @@ async function handleOcr(request, env, ctx) {
     }
   }
 
-  if (imageBytes.length > MAX_BODY_BYTES) {
+  if (imageBytes.length > MAX_IMAGE_BYTES) {
     auditLog(ctx, env, { ip, country, cfRay, userAgent: ua, username, statusCode: 413, imageBytes: imageBytes.length, durationMs: Date.now() - t0 });
     return jsonResp({ error: 'Decoded image too large (max 5 MB)' }, 413);
   }
@@ -242,8 +255,11 @@ Rules:
 - If you cannot find any characters, return []`;
 
   try {
+    // The model takes the image as a plain number array. Build it once and
+    // reuse it for the retry — it's ~8 bytes per image byte.
+    const imageArray = Array.from(imageBytes);
     const makeRequest = () => env.AI.run('@cf/meta/llama-3.2-11b-vision-instruct', {
-      image: [...imageBytes], prompt, max_tokens: 800,
+      image: imageArray, prompt, max_tokens: 800,
     });
 
     let response;
@@ -253,7 +269,7 @@ Rules:
       // 5016 = license agreement required — agree once then retry
       if (err.message?.includes('5016')) {
         await env.AI.run('@cf/meta/llama-3.2-11b-vision-instruct', {
-          image: [...imageBytes], prompt: 'agree', max_tokens: 10,
+          prompt: 'agree', max_tokens: 10,
         }).catch(() => {});
         response = await makeRequest();
       } else {
@@ -292,7 +308,8 @@ export default {
       const method = request.method;
 
       if (url.pathname === '/' && method === 'GET')     return servePage();
-      if (url.pathname === '/ocr' && method === 'POST') return handleOcr(request, env, ctx);
+      // await so async errors in handleOcr land in the catch below
+      if (url.pathname === '/ocr' && method === 'POST') return await handleOcr(request, env, ctx);
 
       return new Response('Not found', { status: 404, headers: SECURITY_HEADERS });
     } catch (err) {
