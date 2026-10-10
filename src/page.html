@@ -103,6 +103,9 @@
   .tc-actions{display:flex;flex-direction:column;gap:.28rem;align-items:flex-end;}
   .lock-btn{background:transparent;border:1px solid var(--muted);color:var(--muted);font-family:'Share Tech Mono',monospace;font-size:.58rem;letter-spacing:.07em;padding:.24rem .48rem;border-radius:3px;cursor:pointer;transition:all .2s;text-transform:uppercase;white-space:nowrap;}
   .lock-btn:hover,.lock-btn.on{border-color:var(--gold);color:var(--gold);}
+  .team-card.dead{opacity:.45;}
+  .dead-bosses{display:flex;flex-wrap:wrap;gap:.35rem;}
+  .dead-btn:hover,.dead-btn.on{border-color:var(--danger);color:var(--danger);}
 
   /* results */
   #results{margin-top:2rem;}
@@ -272,6 +275,10 @@
     <div class="panel-title">⚡ Optimize · 3 Runs</div>
     <p style="font-family:'Share Tech Mono',monospace;font-size:.7rem;color:var(--muted);margin-bottom:.5rem;">Lock teams you've already used, then click below.</p>
     <div class="form-row">
+      <label class="form-label">Dead Bosses (their teams are skipped)</label>
+      <div class="dead-bosses" id="dead-bosses"></div>
+    </div>
+    <div class="form-row">
       <label class="form-label">Required Boss (must be one of the 3 runs)</label>
       <select id="inp-req-boss">
         <option value="">— No requirement</option>
@@ -421,17 +428,20 @@ function toast(msg){const el=document.getElementById('toast');el.textContent=msg
 const RUNS = 3;
 const NUM_SLOTS = 5;
 const LS_KEY = 'union_raid_v2';
+const BOSSES = ['Boss 1','Boss 2','Boss 3','Boss 4','Boss 5'];
 let teams = [];
 let nextId = 1;
+let deadBosses = new Set();
 let slotState = freshSlots();
 
 function freshSlots(){return Array.from({length:NUM_SLOTS},()=>({charName:null,damage:0}));}
 
-function saveStorage(){try{localStorage.setItem(LS_KEY,JSON.stringify({teams,nextId}));}catch(e){}}
+function saveStorage(){try{localStorage.setItem(LS_KEY,JSON.stringify({teams,nextId,dead:[...deadBosses]}));}catch(e){}}
 function loadStorage(){
   try{
     const d=JSON.parse(localStorage.getItem(LS_KEY)||'null');
     if(d&&Array.isArray(d.teams)){teams=d.teams;nextId=d.nextId||(teams.length+1);}
+    if(d&&Array.isArray(d.dead))deadBosses=new Set(d.dead.filter(b=>BOSSES.includes(b)));
   }catch(e){}
 }
 
@@ -655,6 +665,22 @@ function addTeam(){
 ══════════════════════════════════════════ */
 function toggleLock(id){const t=teams.find(t=>t.id===id);if(t){t.locked=!t.locked;saveStorage();renderTeams();}}
 function deleteTeam(id){teams=teams.filter(t=>t.id!==id);saveStorage();renderTeams();}
+function toggleDead(i){
+  const b=BOSSES[i];
+  if(deadBosses.has(b))deadBosses.delete(b);else deadBosses.add(b);
+  saveStorage();renderTeams();renderDeadBosses();
+}
+
+// A dead boss can't be required, so its option is disabled (and cleared if selected)
+function renderDeadBosses(){
+  document.getElementById('dead-bosses').innerHTML=BOSSES.map((b,i)=>{
+    const on=deadBosses.has(b);
+    return`<button class="lock-btn dead-btn ${on?'on':''}" onclick="toggleDead(${i})">${on?'☠ ':''}${esc(b)}</button>`;
+  }).join('');
+  const sel=document.getElementById('inp-req-boss');
+  for(const o of sel.options)o.disabled=deadBosses.has(o.value);
+  if(deadBosses.has(sel.value)){sel.value='';syncReqPrioRow();}
+}
 
 function renderTeams(){
   const list=document.getElementById('team-list');
@@ -665,10 +691,11 @@ function renderTeams(){
         const dmg=c.damage?`<span class="cdmg">${fmtScore(c.damage)}</span>`:'';
         return `<span class="char-pill">${esc(c.name)}${dmg}</span>`;
       }).join('');
-      return`<div class="team-card ${t.locked?'locked':''}">
+      const dead=deadBosses.has(t.boss);
+      return`<div class="team-card ${t.locked?'locked':''} ${dead?'dead':''}">
         <div class="tc-body">
           <div class="tc-name">${esc(t.name)}</div>
-          <div class="tc-meta">${esc(t.boss)}</div>
+          <div class="tc-meta">${esc(t.boss)}${dead?' · ☠ Dead':''}</div>
           <div class="tc-chars">${charsHtml}</div>
         </div>
         <div class="tc-actions">
@@ -690,10 +717,12 @@ function renderTeams(){
 ══════════════════════════════════════════ */
 function optimize(){
   const errEl=document.getElementById('err-box');errEl.classList.remove('on');
-  if(teams.length<RUNS){errEl.textContent=`Need at least ${RUNS} teams. You have ${teams.length}.`;return errEl.classList.add('on');}
+  // Locked teams were already used, so they still count even if their boss has died since
+  const locked=teams.filter(t=>t.locked);const free=teams.filter(t=>!t.locked&&!deadBosses.has(t.boss));
+  const usable=locked.length+free.length;
+  if(usable<RUNS){errEl.textContent=`Need at least ${RUNS} teams. You have ${usable<teams.length?`${usable} usable (${teams.length-usable} target dead bosses)`:teams.length}.`;return errEl.classList.add('on');}
   const reqBoss=document.getElementById('inp-req-boss').value;
   const covers=t=>coversBoss(t,reqBoss);
-  const locked=teams.filter(t=>t.locked);const free=teams.filter(t=>!t.locked);
   if(locked.length>RUNS){errEl.textContent=`Too many locked teams (${locked.length}) for ${RUNS} runs.`;return errEl.classList.add('on');}
   const lcC=findConflicts(locked);
   if(lcC.length){errEl.textContent=`Locked teams share: ${lcC.join(', ')}`;return errEl.classList.add('on');}
@@ -1042,7 +1071,7 @@ function syncReqPrioRow(){
 document.getElementById('inp-req-boss').addEventListener('change',syncReqPrioRow);
 
 /* ══ INIT ══ */
-loadStorage();loadCreds();buildSlots();renderTeams();syncReqPrioRow();
+loadStorage();loadCreds();buildSlots();renderTeams();renderDeadBosses();syncReqPrioRow();
 </script>
 </body>
 </html>
