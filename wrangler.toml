@@ -20,9 +20,9 @@ database_name = "ocr-logs"
 database_id  = "2a7f71a5-5cf0-4f06-b99a-110269ebba4c"
 
 # Custom domain — domain must be on Cloudflare (proxied)
-[[routes]]
-pattern = "nikke.domain.com/*"
-zone_name = "domain.com"
+#[[routes]]
+#pattern = "nikke.domain.com/*"
+#zone_name = "domain.com"
 
 [observability]
 enabled = true
