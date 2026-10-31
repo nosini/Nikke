@@ -153,4 +153,5 @@ export const CHARACTERS = [
   "Mint",
   "Prika",
   "Ark Ranger Black",
+  "Sky",
 ].filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a.localeCompare(b));
